@@ -1,0 +1,238 @@
+import React, { useRef, useState } from 'react';
+import {
+  Keyboard,
+  KeyboardAvoidingView,
+  TextInput,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useSelector, useDispatch } from 'react-redux';
+import * as Haptics from 'expo-haptics';
+
+import { useTheme } from '../../theme/ThemeContext';
+import { RootState, AppDispatch } from '../../store';
+import {
+  loadMessagesThunk,
+} from '../../store/slices/chatSlice';
+import { AttachmentTray } from '../../components/AttachmentTray';
+import { QuoteBar } from '../../components/QuoteBar';
+import { MessageActionSheet } from '../../components/MessageActionSheet';
+import { ForwardSheet } from '../../components/ForwardSheet';
+import { useCall } from '../../components/CallProvider';
+
+import { usePeerKeyLookup } from '../../hooks/usePeerKeyLookup';
+import { useChatSocket } from '../../hooks/useChatSocket';
+import { useReadReceipts } from '../../hooks/useReadReceipts';
+import { useMediaHydration } from '../../hooks/useMediaHydration';
+import { useReplyContext } from '../../hooks/useReplyContext';
+import { useVoicePlayback } from '../../hooks/useVoicePlayback';
+import { useMediaSender } from '../../hooks/useMediaSender';
+import { useTextSender } from '../../hooks/useTextSender';
+import { useMediaPicker } from '../../hooks/useMediaPicker';
+import { useVoiceRecorder } from '../../hooks/useVoiceRecorder';
+import { useMessageActions } from '../../hooks/useMessageActions';
+
+import { ChatHeader } from './chat/ChatHeader';
+import { MessageList } from './chat/MessageList';
+import { ChatComposer } from './chat/ChatComposer';
+import { RecordingBar } from './chat/RecordingBar';
+import { PreviewBar } from './chat/PreviewBar';
+import { useEffect } from 'react';
+
+type ChatScreenParams = {
+  ChatScreen: {
+    conversationId: string;
+    contactName: string;
+    contactPrivateNumber: string;
+    isSelfChat?: boolean;
+    contactPublicKey?: string | null;
+  };
+};
+
+export const ChatScreen = () => {
+  const { colors, isDark } = useTheme();
+  const navigation = useNavigation<any>();
+  const route = useRoute<RouteProp<ChatScreenParams, 'ChatScreen'>>();
+  const dispatch = useDispatch<AppDispatch>();
+
+  const {
+    conversationId,
+    contactName,
+    contactPrivateNumber,
+    isSelfChat,
+    contactPublicKey: initialPeerKey,
+  } = route.params;
+
+  const userId = useSelector((s: RootState) => s.auth.userId);
+  const privateNumber = useSelector((s: RootState) => s.auth.privateNumber);
+  const displayName = useSelector((s: RootState) => s.auth.displayName);
+  const messages = useSelector((s: RootState) => s.chat.activeMessages);
+
+  const senderId = userId || privateNumber || 'local';
+  const firstName = (contactName || '').split(' ')[0] || 'there';
+
+  const { startOutgoingCall } = useCall();
+  const handleCallPress = () => {
+    if (isSelfChat) return;
+    void startOutgoingCall({ name: contactName, number: contactPrivateNumber, conversationId });
+  };
+
+  // Attachment tray
+  const [trayOpen, setTrayOpen] = useState(false);
+  const closeTray = () => { if (!trayOpen) return; setTrayOpen(false); };
+  const togglePlus = () => {
+    Haptics.selectionAsync().catch(() => {});
+    if (trayOpen) { closeTray(); } else { Keyboard.dismiss(); setTrayOpen(true); }
+  };
+
+  const textInputRef = useRef<TextInput>(null);
+
+  // Hooks — dependency order matches plan phases 1-3
+  const { peerPublicKey, peerPublicKeyRef } = usePeerKeyLookup(
+    contactPrivateNumber, isSelfChat, initialPeerKey,
+  );
+  const { hydrateMediaFor } = useMediaHydration(dispatch, messages);
+  const { socketRef, senderIdRef, ackedReadRef } = useChatSocket(
+    conversationId, isSelfChat, senderId, peerPublicKeyRef, dispatch, hydrateMediaFor,
+  );
+  useReadReceipts(socketRef, messages, senderId, isSelfChat, ackedReadRef);
+
+  const { replyTo, handleReply, dismissReply } = useReplyContext(
+    messages, senderId, displayName, contactName, textInputRef,
+  );
+  const { playingId, soundRef, handlePlayVoice } = useVoicePlayback();
+  const { sendMediaAsset } = useMediaSender(
+    conversationId, senderId, contactPrivateNumber, isSelfChat, socketRef, peerPublicKeyRef, dispatch,
+  );
+  const { text, setText, handleSend } = useTextSender(
+    conversationId, senderId, contactPrivateNumber, isSelfChat,
+    socketRef, peerPublicKeyRef, dispatch, replyTo, dismissReply, messages,
+  );
+  const { handlePickFromGallery, handleCamera, handlePickFile } = useMediaPicker(
+    sendMediaAsset, closeTray,
+  );
+  const recorder = useVoiceRecorder(sendMediaAsset, closeTray);
+  const actions = useMessageActions(dispatch, senderId, socketRef);
+
+  // Load message history when peer key is ready
+  useEffect(() => {
+    if (isSelfChat) {
+      dispatch(loadMessagesThunk({ conversationId, peerPublicKey: null }));
+    } else if (peerPublicKey !== null) {
+      dispatch(loadMessagesThunk({ conversationId, peerPublicKey }));
+    }
+  }, [conversationId, peerPublicKey, isSelfChat, dispatch]);
+
+  // Unload playback sound on unmount
+  useEffect(() => {
+    return () => { soundRef.current?.unloadAsync(); };
+  }, [soundRef]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.background }}>
+        <ChatHeader
+          contactName={contactName}
+          contactPrivateNumber={contactPrivateNumber}
+          isSelfChat={isSelfChat}
+          displayName={displayName}
+          colors={colors}
+          onBack={() => navigation.goBack()}
+          onCall={handleCallPress}
+          onCallLongPress={() => { /* reserved */ }}
+        />
+      </SafeAreaView>
+
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>
+        <MessageList
+          messages={messages}
+          senderId={senderId}
+          contactName={contactName}
+          colors={colors}
+          playingId={playingId}
+          isSelfChat={isSelfChat}
+          onReply={handleReply}
+          onActionSheet={(m, isSent, rect) => actions.openActionSheet(m, isSent, rect)}
+          onPlayVoice={handlePlayVoice}
+        />
+
+        {recorder.recMode === 'preview' ? (
+          <PreviewBar
+            previewDuration={recorder.previewDuration}
+            previewPlaying={recorder.previewPlaying}
+            waveformPhase={recorder.waveformPhase}
+            colors={colors}
+            formatDuration={recorder.formatDuration}
+            discardPreview={recorder.discardPreview}
+            togglePreviewPlayback={recorder.togglePreviewPlayback}
+            sendPreview={recorder.sendPreview}
+          />
+        ) : (
+          <>
+            {recorder.recMode === 'idle' && replyTo && (
+              <QuoteBar replyTo={replyTo} onDismiss={dismissReply} />
+            )}
+            {recorder.recMode === 'recording' ? (
+              <RecordingBar
+                recordingDuration={recorder.recordingDuration}
+                cancelDx={recorder.cancelDx}
+                redDotPulse={recorder.redDotPulse}
+                waveformPhase={recorder.waveformPhase}
+                recPan={recorder.recPan}
+                colors={colors}
+                formatDuration={recorder.formatDuration}
+                cancelRec={recorder.cancelRec}
+              />
+            ) : (
+              <ChatComposer
+                text={text}
+                setText={setText}
+                firstName={firstName}
+                trayOpen={trayOpen}
+                colors={colors}
+                textInputRef={textInputRef}
+                recPan={recorder.recPan}
+                handleSend={handleSend}
+                closeTray={closeTray}
+                handleCamera={handleCamera}
+                togglePlus={togglePlus}
+              />
+            )}
+            <AttachmentTray
+              open={trayOpen}
+              onPickGallery={handlePickFromGallery}
+              onPickCamera={handleCamera}
+              onPickFile={handlePickFile}
+              onStartVoice={recorder.startRec}
+            />
+          </>
+        )}
+
+        <SafeAreaView edges={['bottom']} style={{ backgroundColor: colors.background }} />
+      </KeyboardAvoidingView>
+
+      <MessageActionSheet
+        visible={!!actions.actionSheet}
+        message={actions.actionSheet?.message ?? null}
+        rect={actions.actionSheet?.rect ?? null}
+        isSent={actions.actionSheet?.isSent ?? false}
+        isDark={isDark}
+        onDismiss={actions.closeActionSheet}
+        onReply={() => actions.actionSheet && handleReply(actions.actionSheet.message)}
+        onCopy={() => actions.actionSheet && actions.handleCopyText(actions.actionSheet.message)}
+        onForward={() => actions.actionSheet && actions.handleForward(actions.actionSheet.message)}
+        onStar={() => actions.actionSheet && actions.handleStar(actions.actionSheet.message)}
+        onDelete={() => actions.actionSheet && actions.handleDelete(actions.actionSheet.message)}
+        onReact={(e) => actions.actionSheet && actions.handleReact(actions.actionSheet.message, e)}
+      />
+
+      <ForwardSheet
+        visible={actions.forwardingMessage !== null}
+        excludeIds={[conversationId]}
+        onClose={() => actions.setForwardingMessage(null)}
+        onPick={actions.performForward}
+      />
+    </View>
+  );
+};

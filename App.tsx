@@ -1,0 +1,28 @@
+import React, { useEffect } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Provider } from 'react-redux';
+import { store } from './src/store';
+import { ThemeProvider } from './src/theme/ThemeContext';
+import { RootNavigator } from './src/navigation/RootNavigator';
+import { StatusBar } from 'expo-status-bar';
+import { initDB } from './src/services/database';
+import { CallProvider } from './src/components/CallProvider';
+
+export default function App() {
+  useEffect(() => {
+    initDB();
+  }, []);
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <Provider store={store}>
+        <ThemeProvider>
+          <CallProvider>
+            <RootNavigator />
+          </CallProvider>
+          <StatusBar style="auto" />
+        </ThemeProvider>
+      </Provider>
+    </GestureHandlerRootView>
+  );
+}
