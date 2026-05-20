@@ -160,7 +160,7 @@ export const styles = StyleSheet.create({
   inputWrap: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     borderRadius: 22,
     borderWidth: 1,
     paddingLeft: 6,

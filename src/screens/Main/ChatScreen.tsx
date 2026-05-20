@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
+  Platform,
   TextInput,
   View,
 } from 'react-native';
@@ -144,7 +145,7 @@ export const ChatScreen = () => {
         />
       </SafeAreaView>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
         <MessageList
           messages={messages}
           senderId={senderId}

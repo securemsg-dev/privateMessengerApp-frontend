@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { DialpadModal } from '../../components/DialpadModal';
 import {
   ActivityIndicator,
   FlatList,
@@ -74,6 +75,7 @@ export const CallsScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dialpadVisible, setDialpadVisible] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -176,12 +178,18 @@ export const CallsScreen = () => {
           <View style={[styles.emptyIconWrap, { backgroundColor: colors.surface }]}>
             <Ionicons name="call-outline" size={52} color={colors.textSecondary} />
           </View>
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>
-            No call history
-          </Text>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>No calls yet</Text>
           <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-            Make your first encrypted call
+            Your call history will appear here
           </Text>
+          <TouchableOpacity
+            style={[styles.emptyCallBtn, { backgroundColor: colors.primary }]}
+            activeOpacity={0.85}
+            onPress={() => setDialpadVisible(true)}
+          >
+            <Ionicons name="keypad-outline" size={18} color="#fff" />
+            <Text style={[styles.emptyCallBtnText, { color: '#fff' }]}>Start a new call</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -204,9 +212,12 @@ export const CallsScreen = () => {
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: colors.primary }]}
         activeOpacity={0.85}
+        onPress={() => setDialpadVisible(true)}
       >
         <Ionicons name="keypad-outline" size={24} color="#fff" />
       </TouchableOpacity>
+
+      <DialpadModal visible={dialpadVisible} onClose={() => setDialpadVisible(false)} />
     </View>
   );
 };
@@ -258,6 +269,16 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 20, fontWeight: '700' },
   emptySubtitle: { fontSize: 15, textAlign: 'center' },
+  emptyCallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 24,
+  },
+  emptyCallBtnText: { fontSize: 15, fontWeight: '600' },
 
   /* FAB */
   fab: {
