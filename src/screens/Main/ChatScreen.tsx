@@ -6,7 +6,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { useSelector, useDispatch } from 'react-redux';
 import * as Haptics from 'expo-haptics';
@@ -39,6 +39,7 @@ import { MessageList } from './chat/MessageList';
 import { ChatComposer } from './chat/ChatComposer';
 import { RecordingBar } from './chat/RecordingBar';
 import { PreviewBar } from './chat/PreviewBar';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import { useEffect } from 'react';
 
 type ChatScreenParams = {
@@ -56,6 +57,8 @@ export const ChatScreen = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<ChatScreenParams, 'ChatScreen'>>();
   const dispatch = useDispatch<AppDispatch>();
+  const { bottom: bottomInset } = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
 
   const {
     conversationId,
@@ -145,7 +148,7 @@ export const ChatScreen = () => {
         />
       </SafeAreaView>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <MessageList
           messages={messages}
           senderId={senderId}
@@ -210,7 +213,7 @@ export const ChatScreen = () => {
           </>
         )}
 
-        <SafeAreaView edges={['bottom']} style={{ backgroundColor: colors.background }} />
+        <View style={{ height: keyboardHeight > 0 ? 0 : bottomInset, backgroundColor: colors.background }} />
       </KeyboardAvoidingView>
 
       <MessageActionSheet

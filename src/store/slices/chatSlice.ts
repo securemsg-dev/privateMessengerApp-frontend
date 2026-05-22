@@ -573,9 +573,16 @@ const chatSlice = createSlice({
       .addCase(loadMessagesThunk.fulfilled, (state, action) => {
         state.activeMessages = action.payload;
       })
-      // sendMessage
+      // sendMessage — upsert so a fast WS echo that already inserted the
+      // message by client_temp_id doesn't produce a duplicate key.
       .addCase(sendMessageThunk.fulfilled, (state, action) => {
-        state.activeMessages.push(action.payload);
+        const msg = action.payload;
+        const idx = state.activeMessages.findIndex((m) => m.id === msg.id);
+        if (idx >= 0) {
+          state.activeMessages[idx] = { ...state.activeMessages[idx], ...msg };
+        } else {
+          state.activeMessages.push(msg);
+        }
       })
       // deleteAllConversations
       .addCase(deleteAllConversationsThunk.fulfilled, (state) => {

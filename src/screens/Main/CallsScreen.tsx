@@ -15,7 +15,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useSelector } from 'react-redux';
 
 import { useTheme } from '../../theme/ThemeContext';
-import { ApiError, CallDTO, listCallsApi } from '../../services/api';
+import { CallDTO, listCallsApi } from '../../services/api';
 import { RootState } from '../../store';
 
 type CallDirection = 'incoming' | 'outgoing';
@@ -74,11 +74,9 @@ export const CallsScreen = () => {
   const [calls, setCalls] = useState<DisplayCall[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [dialpadVisible, setDialpadVisible] = useState(false);
 
   const load = useCallback(async () => {
-    setError(null);
     try {
       const rows = await listCallsApi();
       const display: DisplayCall[] = rows.map((c) => {
@@ -103,9 +101,8 @@ export const CallsScreen = () => {
         };
       });
       setCalls(display);
-    } catch (err) {
-      const detail = err instanceof ApiError ? err.detail : 'Failed to load calls';
-      setError(detail);
+    } catch {
+      // silently fall through — empty state handles no-calls UI
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -169,10 +166,6 @@ export const CallsScreen = () => {
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
         </View>
-      ) : error && calls.length === 0 ? (
-        <View style={styles.center}>
-          <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
-        </View>
       ) : calls.length === 0 ? (
         <View style={styles.emptyState}>
           <View style={[styles.emptyIconWrap, { backgroundColor: colors.surface }]}>
@@ -234,7 +227,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 22, fontWeight: '700' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  errorText: { fontSize: 14 },
 
   /* Row */
   row: {
