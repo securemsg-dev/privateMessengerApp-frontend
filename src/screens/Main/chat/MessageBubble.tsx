@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Sharing from 'expo-sharing';
 import { SwipeableMessage } from '../../../components/SwipeableMessage';
 import { Message } from '../../../store/slices/chatSlice';
 import { BUBBLE_MAX_WIDTH, ON_PRIMARY, styles } from './styles';
@@ -200,6 +201,65 @@ export const MessageBubble = React.memo(
           </TouchableOpacity>
         );
       }
+      if (item.type === 'document') {
+        const filename = item.mediaUri
+          ? decodeURIComponent(item.mediaUri.split('/').pop() ?? 'Document')
+          : item.content;
+        const isLoading = !item.mediaUri && !!item.mediaEnvelope;
+        const handleOpenDoc = async () => {
+          if (!item.mediaUri) return;
+          const canShare = await Sharing.isAvailableAsync();
+          if (canShare) await Sharing.shareAsync(item.mediaUri);
+        };
+        return (
+          <TouchableOpacity
+            style={[
+              styles.voiceBubble,
+              { minWidth: 180, paddingRight: 12 },
+            ]}
+            onPress={handleOpenDoc}
+            activeOpacity={item.mediaUri ? 0.7 : 1}
+            disabled={!item.mediaUri}
+          >
+            <View
+              style={[
+                styles.voicePlayBtn,
+                {
+                  backgroundColor: isMine
+                    ? 'rgba(255,255,255,0.25)'
+                    : colors.primary + '22',
+                },
+              ]}
+            >
+              {isLoading ? (
+                <ActivityIndicator size="small" color={isMine ? ON_PRIMARY : colors.primary} />
+              ) : (
+                <Ionicons
+                  name="document-text"
+                  size={20}
+                  color={isMine ? ON_PRIMARY : colors.primary}
+                />
+              )}
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text
+                numberOfLines={2}
+                style={[styles.bubbleText, { color: textColor, fontSize: 13, lineHeight: 17 }]}
+              >
+                {filename}
+              </Text>
+              <Text
+                style={[
+                  styles.voiceDuration,
+                  { color: isMine ? 'rgba(255,255,255,0.7)' : colors.textSecondary },
+                ]}
+              >
+                {isLoading ? 'Downloading…' : item.mediaUri ? 'Tap to open' : 'Unavailable'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        );
+      }
       return <Text style={[styles.bubbleText, { color: textColor }]}>{item.content}</Text>;
     };
 
@@ -251,6 +311,8 @@ export const MessageBubble = React.memo(
                     ? '📷 Photo'
                     : replyPreview.type === 'video'
                     ? '🎥 Video'
+                    : replyPreview.type === 'document'
+                    ? '📎 Document'
                     : replyPreview.content}
                 </Text>
               </View>

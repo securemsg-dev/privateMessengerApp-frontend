@@ -29,7 +29,7 @@ export interface ServerMessageEvent {
   message_id: string;
   client_temp_id?: string | null;
   encrypted_payload: string;
-  message_type: 'text' | 'voice' | 'image';
+  message_type: 'text' | 'voice' | 'image' | 'document';
   self_destruct: boolean;
   reply_to_id?: string | null;
   timestamp: string;
@@ -78,7 +78,7 @@ export type ServerEvent =
 export interface ClientMessageEvent {
   type: 'message';
   encrypted_payload: string;
-  message_type: 'text' | 'voice' | 'image';
+  message_type: 'text' | 'voice' | 'image' | 'document';
   self_destruct?: boolean;
   client_temp_id?: string;
   reply_to_id?: string;

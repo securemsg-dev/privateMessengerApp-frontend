@@ -7,7 +7,7 @@ import { useTheme } from '../theme/ThemeContext';
 export interface ReplyContext {
   senderName: string;
   preview: string;
-  type: 'text' | 'image' | 'video' | 'voice';
+  type: 'text' | 'image' | 'video' | 'voice' | 'document';
   mediaUri?: string;
 }
 
@@ -29,6 +29,8 @@ export const QuoteBar = ({ replyTo, onDismiss }: Props) => {
       ? 'Video'
       : replyTo.type === 'voice'
       ? 'Voice message'
+      : replyTo.type === 'document'
+      ? 'Document'
       : replyTo.preview.slice(0, PREVIEW_MAX);
 
   const renderThumb = () => {

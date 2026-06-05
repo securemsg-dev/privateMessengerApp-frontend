@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { useSelector, useDispatch } from 'react-redux';
 import {
   ActivityIndicator,
   AppState,
   AppStateStatus,
   BackHandler,
+  Platform,
   View,
 } from 'react-native';
 import { RootState, AppDispatch } from '../store';
@@ -15,7 +16,19 @@ import { MainStack } from './MainStack';
 import { AppLockScreen } from '../screens/Auth/AppLockScreen';
 import { useTheme } from '../theme/ThemeContext';
 import { ensureKeyPairFor, getPublicKey } from '../services/crypto';
-import { uploadPublicKeyApi } from '../services/api';
+import { uploadPublicKeyApi, registerDeviceApi } from '../services/api';
+import * as Notifications from 'expo-notifications';
+
+// Show notifications when app is foregrounded (banner + sound).
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 export const RootNavigator = () => {
   const isAuthenticated = useSelector((state: RootState) => state.auth.isAuthenticated);
@@ -24,6 +37,8 @@ export const RootNavigator = () => {
   const [isInitializing, setIsInitializing] = useState(true);
   const { colors } = useTheme();
   const dispatch = useDispatch<AppDispatch>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const navigationRef = useRef<NavigationContainerRef<any>>(null);
 
   // Ref so the AppState listener stays stable but still reads fresh auth state.
   const isAuthenticatedRef = useRef(isAuthenticated);
@@ -62,6 +77,55 @@ export const RootNavigator = () => {
     };
   }, [isAuthenticated, appLocked, privateNumber]);
 
+  // Register device push token once authenticated so the backend can deliver
+  // notifications when the app is backgrounded or closed.
+  useEffect(() => {
+    if (!isAuthenticated || appLocked) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { status: existing } = await Notifications.getPermissionsAsync();
+        let finalStatus = existing;
+        if (existing !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+        if (finalStatus !== 'granted' || cancelled) return;
+
+        const tokenData = await Notifications.getExpoPushTokenAsync();
+        if (cancelled) return;
+
+        await registerDeviceApi({
+          device_name: Platform.OS === 'ios' ? 'iPhone' : 'Android Device',
+          platform: Platform.OS === 'ios' ? 'ios' : 'android',
+          push_token: tokenData.data,
+        });
+      } catch (err) {
+        console.warn('[push] Failed to register push token:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, appLocked]);
+
+  // Navigate to the relevant chat when the user taps a push notification.
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as Record<string, string>;
+      const conversationId = data?.conversation_id;
+      const contactName = data?.contact_name ?? 'Chat';
+      const contactPrivateNumber = data?.contact_private_number ?? '';
+      if (!conversationId || !navigationRef.current?.isReady()) return;
+      navigationRef.current.navigate('ChatScreen', {
+        conversationId,
+        contactName,
+        contactPrivateNumber,
+      });
+    });
+    return () => sub.remove();
+  }, []);
+
   // Re-lock the app whenever it returns from background to foreground.
   useEffect(() => {
     let prev: AppStateStatus = AppState.currentState;
@@ -92,7 +156,7 @@ export const RootNavigator = () => {
 
   return (
     <View style={{ flex: 1 }}>
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         {isAuthenticated ? <MainStack /> : <AuthStack />}
       </NavigationContainer>
       {isAuthenticated && appLocked && <AppLockScreen />}

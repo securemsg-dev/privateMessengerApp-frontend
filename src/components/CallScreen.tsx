@@ -24,9 +24,13 @@ interface Props {
   contactName: string;
   contactNumber: string;
   startedAt: number;
+  muted: boolean;
+  speakerOn: boolean;
   onAccept: () => void;
   onDecline: () => void;
   onEnd: () => void;
+  onToggleMute: () => void;
+  onToggleSpeaker: () => void;
 }
 
 const formatPrivateNumber = (n: string) => {
@@ -134,14 +138,15 @@ export const CallScreen = ({
   contactName,
   contactNumber,
   startedAt,
+  muted,
+  speakerOn,
   onAccept,
   onDecline,
   onEnd,
+  onToggleMute,
+  onToggleSpeaker,
 }: Props) => {
   const { colors } = useTheme();
-  const [muted, setMuted] = useState(false);
-  const [speaker, setSpeaker] = useState(false);
-  const [audioMode, setAudioMode] = useState(false);
   const [seconds, setSeconds] = useState(0);
 
   // Tick the connected-call timer every second
@@ -217,19 +222,13 @@ export const CallScreen = ({
                 icon={muted ? 'mic-off' : 'mic-off-outline'}
                 label="Mute"
                 active={muted}
-                onPress={() => setMuted((v) => !v)}
+                onPress={onToggleMute}
               />
               <ControlButton
-                icon={speaker ? 'volume-high' : 'volume-high-outline'}
+                icon={speakerOn ? 'volume-high' : 'volume-high-outline'}
                 label="Speaker"
-                active={speaker}
-                onPress={() => setSpeaker((v) => !v)}
-              />
-              <ControlButton
-                icon={audioMode ? 'headset' : 'headset-outline'}
-                label="Audio"
-                active={audioMode}
-                onPress={() => setAudioMode((v) => !v)}
+                active={speakerOn}
+                onPress={onToggleSpeaker}
               />
             </View>
           )}

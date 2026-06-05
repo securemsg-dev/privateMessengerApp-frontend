@@ -1,7 +1,8 @@
 import { Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 
-type SendMediaAsset = (uri: string, mime: string, type: 'image' | 'video' | 'voice') => Promise<void>;
+type SendMediaAsset = (uri: string, mime: string, type: 'image' | 'video' | 'voice' | 'document') => Promise<void>;
 
 export function useMediaPicker(
   sendMediaAsset: SendMediaAsset,
@@ -45,9 +46,17 @@ export function useMediaPicker(
     }
   };
 
-  const handlePickFile = () => {
+  const handlePickFile = async () => {
     closeTray();
-    Alert.alert('Coming soon', 'File attachments will be available in the next release.');
+    const result = await DocumentPicker.getDocumentAsync({
+      type: '*/*',
+      copyToCacheDirectory: true,
+    });
+    if (!result.canceled && result.assets.length > 0) {
+      const asset = result.assets[0];
+      const mime = asset.mimeType ?? 'application/octet-stream';
+      await sendMediaAsset(asset.uri, mime, 'document');
+    }
   };
 
   return { handlePickFromGallery, handleCamera, handlePickFile };

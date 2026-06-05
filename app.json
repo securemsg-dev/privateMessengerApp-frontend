@@ -16,7 +16,7 @@
       "bundleIdentifier": "com.securemsg.app",
       "infoPlist": {
         "NSCameraUsageDescription": "PrivaChat needs camera access to send photos and videos.",
-        "NSMicrophoneUsageDescription": "PrivaChat needs microphone access to send voice messages.",
+        "NSMicrophoneUsageDescription": "PrivaChat needs microphone access to send voice messages and make calls.",
         "NSPhotoLibraryUsageDescription": "PrivaChat needs photo library access to send images and videos.",
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -37,7 +37,9 @@
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_CONNECT"
       ]
     },
     "web": {
@@ -58,7 +60,9 @@
         {
           "microphonePermission": "Allow PrivaChat to access your microphone for voice messages."
         }
-      ]
+      ],
+      "react-native-webrtc",
+      "expo-notifications"
     ],
     "extra": {
       "eas": {

@@ -497,6 +497,80 @@ export function deleteMessageApi(
   });
 }
 
+// ── WebRTC / Calls ───────────────────────────────────────────────────────────
+
+export interface IceServerConfig {
+  urls: string[];
+  username?: string;
+  credential?: string;
+}
+
+export function getWebRtcConfigApi(): Promise<{ ice_servers: IceServerConfig[] }> {
+  return requestWithRefresh<{ ice_servers: IceServerConfig[] }>('/webrtc/config', {
+    method: 'GET',
+    auth: true,
+  });
+}
+
+export interface CallRecord {
+  id: string;
+  conversation_id: string | null;
+  caller_id: string | null;
+  callee_id: string | null;
+  started_at: string;
+  accepted_at: string | null;
+  ended_at: string | null;
+  end_reason: string | null;
+}
+
+export function createCallApi(body: {
+  conversation_id: string;
+  callee_id: string;
+}): Promise<CallRecord> {
+  return requestWithRefresh<CallRecord>('/calls', {
+    method: 'POST',
+    auth: true,
+    body,
+  });
+}
+
+export function updateCallApi(
+  callId: string,
+  body: { accepted_at?: string; ended_at?: string; end_reason?: string },
+): Promise<CallRecord> {
+  return requestWithRefresh<CallRecord>(`/calls/${callId}`, {
+    method: 'PATCH',
+    auth: true,
+    body,
+  });
+}
+
+export type CallDTO = CallRecord;
+
+export function listCallsApi(): Promise<CallDTO[]> {
+  return requestWithRefresh<CallDTO[]>('/calls', {
+    method: 'GET',
+    auth: true,
+  });
+}
+
+// ── Device registration ──────────────────────────────────────────────────────
+
+export interface DeviceRegisterBody {
+  device_name: string;
+  platform: 'ios' | 'android';
+  push_token?: string;
+  public_key?: string;
+}
+
+export function registerDeviceApi(body: DeviceRegisterBody): Promise<{ id: string }> {
+  return requestWithRefresh<{ id: string }>('/devices/register', {
+    method: 'POST',
+    auth: true,
+    body,
+  });
+}
+
 // ── WebSocket URL helper ─────────────────────────────────────────────────────
 
 /**

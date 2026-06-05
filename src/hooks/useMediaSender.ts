@@ -18,7 +18,7 @@ export function useMediaSender(
   const sendMediaAsset = async (
     localUri: string,
     mime: string,
-    msgType: 'image' | 'video' | 'voice',
+    msgType: 'image' | 'video' | 'voice' | 'document',
   ) => {
     const localId =
       Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -50,8 +50,8 @@ export function useMediaSender(
       } else {
         console.warn('[crypto] no peer public key; envelope sent in plaintext');
       }
-      const wireType: 'text' | 'voice' | 'image' =
-        msgType === 'voice' ? 'voice' : 'image';
+      const wireType: 'text' | 'voice' | 'image' | 'document' =
+        msgType === 'voice' ? 'voice' : msgType === 'document' ? 'document' : 'image';
       socketRef.current?.send({
         type: 'message',
         message_type: wireType,

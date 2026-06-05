@@ -14,7 +14,7 @@ import {
 
 /* ── Types ─────────────────────────────────────────────── */
 
-export type MessageType = 'text' | 'image' | 'video' | 'voice';
+export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'document';
 
 export interface Conversation {
   id: string;
@@ -303,7 +303,8 @@ export function mediaPlaceholder(mime: string): string {
   if (mime.startsWith('image/')) return '📷 Photo';
   if (mime.startsWith('video/')) return '🎥 Video';
   if (mime.startsWith('audio/')) return '🎤 Voice message';
-  return '📎 Attachment';
+  if (mime === 'application/pdf') return '📄 PDF Document';
+  return '📎 Document';
 }
 
 /**
