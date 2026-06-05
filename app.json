@@ -61,7 +61,6 @@
           "microphonePermission": "Allow PrivaChat to access your microphone for voice messages."
         }
       ],
-      "react-native-webrtc",
       "expo-notifications"
     ],
     "extra": {
