@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "PrivaChat",
+    "slug": "privachat",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,13 +13,16 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.securemsg.app",
       "infoPlist": {
         "NSCameraUsageDescription": "PrivaChat needs camera access to send photos and videos.",
         "NSMicrophoneUsageDescription": "PrivaChat needs microphone access to send voice messages.",
-        "NSPhotoLibraryUsageDescription": "PrivaChat needs photo library access to send images and videos."
+        "NSPhotoLibraryUsageDescription": "PrivaChat needs photo library access to send images and videos.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
+      "package": "com.securemsg.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -34,16 +37,8 @@
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.MODIFY_AUDIO_SETTINGS"
-      ],
-      "package": "com.anonymous.frontend"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -64,6 +59,12 @@
           "microphonePermission": "Allow PrivaChat to access your microphone for voice messages."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e33c1a12-10ed-4e3f-aae8-898608927649"
+      }
+    },
+    "owner": "securemsg-dev"
   }
 }

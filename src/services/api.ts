@@ -232,6 +232,8 @@ export interface UserPublicDTO {
   display_name: string | null;
   /** Base64 Curve25519 public key. Null until the user uploads one (Phase B). */
   public_key: string | null;
+  /** Blob UUID stored in the media system. Use buildAvatarUrl() to get the download URL. */
+  profile_picture_key: string | null;
 }
 
 export interface LastMessagePreviewDTO {
@@ -315,6 +317,51 @@ export function uploadPublicKeyApi(publicKeyB64: string): Promise<UserPublicDTO>
     auth: true,
     body: { public_key: publicKeyB64 },
   });
+}
+
+/**
+ * PATCH /users/me — partial profile update. Only non-undefined fields are sent.
+ * Pass `profile_picture_key` with the blob_id after a successful media upload.
+ */
+export function patchMeApi(body: {
+  display_name?: string;
+  profile_picture_key?: string;
+}): Promise<UserPublicDTO> {
+  return requestWithRefresh<UserPublicDTO>('/users/me', {
+    method: 'PATCH',
+    auth: true,
+    body,
+  });
+}
+
+/**
+ * Upload raw bytes to a pre-signed upload URL (PUT /api/v1/media/{blob_id}).
+ * The upload URL comes from requestMediaUploadApi(). Requires auth.
+ */
+export async function uploadBlobBytesApi(uploadUrl: string, fileUri: string): Promise<void> {
+  const token = await SecureStore.getItemAsync(TOKEN_KEY);
+  const resp = await fetch(fileUri);
+  const blob = await resp.blob();
+  const putResp = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: blob,
+  });
+  if (!putResp.ok) {
+    throw new ApiError(putResp.status, `Media upload failed: HTTP ${putResp.status}`);
+  }
+}
+
+/**
+ * Build a full download URL for an avatar blob. The token must be passed as
+ * an Authorization header — use FileSystem.downloadAsync for image caching.
+ */
+export function buildAvatarUrl(blobId: string): string {
+  const root = BASE_URL.replace(/\/api\/v1\/?$/, '');
+  return `${root}/api/v1/media/${blobId}`;
 }
 
 /** POST /contacts/lookup — find a user by their 10-digit private number. */

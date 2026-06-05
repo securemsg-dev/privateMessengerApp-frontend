@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,18 +7,37 @@ import {
   TouchableOpacity,
   TextInput,
   Switch,
+  Image,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useDispatch, useSelector } from 'react-redux';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+
 import { logoutThunk } from '../../store/slices/authSlice';
 import { RootState, AppDispatch } from '../../store';
 import { useTheme } from '../../theme/ThemeContext';
 import { BottomSheet } from '../../components/BottomSheet';
+import {
+  getMeApi,
+  patchMeApi,
+  requestMediaUploadApi,
+  uploadBlobBytesApi,
+  buildAvatarUrl,
+  TOKEN_KEY,
+} from '../../services/api';
+import * as SecureStore from '../../utils/secureStorage';
 
 const DANGER = '#e74c3c';
+
+function avatarCachePath(blobId: string): string {
+  return `${FileSystem.cacheDirectory}avatar_${blobId}.jpg`;
+}
 
 export const ProfileScreen = () => {
   const { colors, isDark } = useTheme();
@@ -31,6 +50,102 @@ export const ProfileScreen = () => {
   const [bio, setBio] = useState('');
   const [showSignOut, setShowSignOut] = useState(false);
   const [keepHistory, setKeepHistory] = useState(true);
+
+  // Avatar state
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [avatarBlobId, setAvatarBlobId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // On mount: fetch profile to get current avatar blob id, then load from cache
+  useEffect(() => {
+    getMeApi()
+      .then((me) => {
+        if (me.profile_picture_key) {
+          setAvatarBlobId(me.profile_picture_key);
+        }
+      })
+      .catch(() => { /* non-critical — profile still renders without avatar */ });
+  }, []);
+
+  // Whenever avatarBlobId changes, ensure the image is in local cache
+  const loadAvatar = useCallback(async (blobId: string) => {
+    const localPath = avatarCachePath(blobId);
+    const info = await FileSystem.getInfoAsync(localPath);
+    if (info.exists) {
+      setAvatarUri(localPath);
+      return;
+    }
+    const token = await SecureStore.getItemAsync(TOKEN_KEY);
+    try {
+      const result = await FileSystem.downloadAsync(
+        buildAvatarUrl(blobId),
+        localPath,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      );
+      setAvatarUri(result.uri);
+    } catch {
+      // Download failed — leave avatarUri null, icon shows instead
+    }
+  }, []);
+
+  useEffect(() => {
+    if (avatarBlobId) loadAvatar(avatarBlobId);
+  }, [avatarBlobId, loadAvatar]);
+
+  const handlePickAvatar = async () => {
+    setUploadError(null);
+
+    // Request permission
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow access to your photo library in Settings.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    if (result.canceled || !result.assets.length) return;
+
+    const asset = result.assets[0];
+    setUploading(true);
+
+    try {
+      // Get accurate file size from disk (post-compression)
+      const fileInfo = await FileSystem.getInfoAsync(asset.uri, { size: true });
+      const sizeBytes = (fileInfo as any).size as number;
+
+      if (!sizeBytes || sizeBytes === 0) {
+        throw new Error('Could not read image file size');
+      }
+
+      // 1. Reserve upload slot
+      const reservation = await requestMediaUploadApi({ size_bytes: sizeBytes, mime: 'image/jpeg' });
+
+      // 2. Upload raw bytes via PUT
+      await uploadBlobBytesApi(reservation.upload_url, asset.uri);
+
+      // 3. Save blob id on the user profile
+      await patchMeApi({ profile_picture_key: reservation.blob_id });
+
+      // 4. Cache the picked image locally (no second download needed)
+      const localPath = avatarCachePath(reservation.blob_id);
+      await FileSystem.copyAsync({ from: asset.uri, to: localPath });
+
+      setAvatarBlobId(reservation.blob_id);
+      setAvatarUri(localPath);
+    } catch (err: any) {
+      const msg = err?.detail || err?.message || 'Upload failed. Please try again.';
+      setUploadError(msg);
+      Alert.alert('Upload failed', msg);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleSignOut = () => {
     setShowSignOut(false);
@@ -48,23 +163,42 @@ export const ProfileScreen = () => {
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
-          <TouchableOpacity>
-            <Ionicons name="pencil-outline" size={22} color={colors.text} />
-          </TouchableOpacity>
+          <View style={{ width: 24 }} />
         </View>
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Avatar */}
         <View style={styles.avatarSection}>
-          <TouchableOpacity style={styles.avatarWrap} activeOpacity={0.8}>
-            <View style={[styles.avatar, { backgroundColor: colors.surface }]}>
-              <Ionicons name="person" size={44} color={colors.textSecondary} />
-            </View>
+          <TouchableOpacity
+            style={styles.avatarWrap}
+            activeOpacity={0.8}
+            onPress={handlePickAvatar}
+            disabled={uploading}
+          >
+            {avatarUri ? (
+              <Image
+                source={{ uri: avatarUri }}
+                style={[styles.avatar, styles.avatarImage]}
+              />
+            ) : (
+              <View style={[styles.avatar, { backgroundColor: colors.surface }]}>
+                <Ionicons name="person" size={44} color={colors.textSecondary} />
+              </View>
+            )}
             <View style={[styles.cameraOverlay, { backgroundColor: colors.primary }]}>
-              <Ionicons name="camera-outline" size={14} color="#fff" />
+              {uploading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="camera-outline" size={14} color="#fff" />
+              )}
             </View>
           </TouchableOpacity>
+
+          {uploadError ? (
+            <Text style={styles.errorText}>{uploadError}</Text>
+          ) : null}
+
           <Text style={[styles.displayName, { color: colors.text }]}>{displayName}</Text>
           <Text style={[styles.privateNumber, { color: colors.textSecondary }]}>
             {rawNum ? fmt(rawNum) : '—'}
@@ -167,6 +301,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+  },
   cameraOverlay: {
     position: 'absolute',
     bottom: 0,
@@ -177,6 +316,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  errorText: { fontSize: 13, color: DANGER, textAlign: 'center' },
   displayName: { fontSize: 22, fontWeight: '700' },
   privateNumber: { fontSize: 15 },
   section: { gap: 8 },
@@ -202,7 +342,6 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   menuLabel: { fontSize: 15, fontWeight: '500' },
-  deleteNote: { fontSize: 12, lineHeight: 18 },
   sheetTitle: { fontSize: 22, fontWeight: '700', marginBottom: 20 },
   toggleRow: {
     flexDirection: 'row',
