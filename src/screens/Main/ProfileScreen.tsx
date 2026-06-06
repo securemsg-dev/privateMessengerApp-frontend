@@ -17,7 +17,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useDispatch, useSelector } from 'react-redux';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+// expo-file-system v19 (Expo SDK 54) reshaped its API — the imperative helpers
+// used here (cacheDirectory / getInfoAsync with size) live under the legacy entry.
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { logoutThunk } from '../../store/slices/authSlice';
 import { RootState, AppDispatch } from '../../store';
@@ -115,8 +117,10 @@ export const ProfileScreen = () => {
     setUploading(true);
 
     try {
-      // Get accurate file size from disk (post-compression)
-      const fileInfo = await FileSystem.getInfoAsync(asset.uri, { size: true });
+      // Get accurate file size from disk (post-compression).
+      // size is always included on the result for existing files (the legacy
+      // `{ size: true }` option was removed in expo-file-system v19).
+      const fileInfo = await FileSystem.getInfoAsync(asset.uri);
       const sizeBytes = (fileInfo as any).size as number;
 
       if (!sizeBytes || sizeBytes === 0) {
