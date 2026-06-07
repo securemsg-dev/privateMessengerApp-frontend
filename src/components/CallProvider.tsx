@@ -30,6 +30,14 @@ import {
 } from '../services/api';
 import * as SecureStore from '../utils/secureStorage';
 
+// How long an unanswered call rings before it auto-cancels (caller) / is
+// marked missed (callee). Matches the standard ~30s phone-app behaviour.
+const RING_TIMEOUT_MS = 30_000;
+// While ringing, re-send the offer on this cadence so a recipient whose user
+// WS reconnects on foreground (e.g. after the incoming-call push wakes them)
+// still catches it — the WS publish itself is fire-and-forget.
+const OFFER_RESEND_MS = 3_000;
+
 // ─── Public types ──────────────────────────────────────────────────────────────
 
 export type CallMode =
@@ -89,6 +97,8 @@ const CallContext = createContext<CallContextValue>({
 
 export const CallProvider = ({ children }: { children: ReactNode }) => {
   const isAuthenticated = useSelector((s: RootState) => s.auth.isAuthenticated);
+  const myDisplayName = useSelector((s: RootState) => s.auth.displayName);
+  const myPrivateNumber = useSelector((s: RootState) => s.auth.privateNumber);
 
   const [callState, setCallState] = useState<CallState | null>(null);
   const [muted, setMuted] = useState(false);
@@ -101,6 +111,30 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   const pendingIceRef = useRef<RTCIceCandidate[]>([]);
   // Store incoming offer before user accepts
   const pendingOfferRef = useRef<{ sdp: string; callId: string; fromUserId: string; conversationId: string; contactName: string; contactPrivateNumber: string } | null>(null);
+
+  // Ring timers. Caller: re-send the offer on an interval + give up after the
+  // ring timeout. Callee: auto-decline (missed) after the ring timeout.
+  const outgoingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const offerResendRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const incomingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The full call_offer payload, kept so the resend interval can replay it.
+  const outgoingOfferMsgRef = useRef<object | null>(null);
+
+  const clearCallTimers = useCallback(() => {
+    if (outgoingTimeoutRef.current) {
+      clearTimeout(outgoingTimeoutRef.current);
+      outgoingTimeoutRef.current = null;
+    }
+    if (offerResendRef.current) {
+      clearInterval(offerResendRef.current);
+      offerResendRef.current = null;
+    }
+    if (incomingTimeoutRef.current) {
+      clearTimeout(incomingTimeoutRef.current);
+      incomingTimeoutRef.current = null;
+    }
+    outgoingOfferMsgRef.current = null;
+  }, []);
 
   // ── Audio mode helpers ──────────────────────────────────────────────────────
 
@@ -149,6 +183,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   // ── Cleanup call ───────────────────────────────────────────────────────────
 
   const cleanupCall = useCallback(async () => {
+    clearCallTimers();
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t: any) => t.stop());
       localStreamRef.current = null;
@@ -163,7 +198,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     setSpeakerOn(false);
     setCallState(null);
     await setCallAudioMode(false);
-  }, [setCallAudioMode]);
+  }, [setCallAudioMode, clearCallTimers]);
 
   // ── User WebSocket management ───────────────────────────────────────────────
 
@@ -185,6 +220,11 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       const type: string = data.type;
 
       if (type === 'call_offer') {
+        // The caller re-sends the offer every few seconds while ringing, so
+        // ignore duplicates for a call we're already handling (banner shown
+        // or already accepted) — only the first one rings.
+        if (pendingOfferRef.current?.callId === data.call_id) return;
+
         // Incoming call — show banner
         const contactName = data.caller_display_name ?? 'Unknown';
         const contactPrivateNumber = data.caller_private_number ?? '';
@@ -205,8 +245,31 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
           contactPrivateNumber,
           startedAt: Date.now(),
         });
+
+        // Auto-decline as "missed" if the user never picks up in time.
+        if (incomingTimeoutRef.current) clearTimeout(incomingTimeoutRef.current);
+        incomingTimeoutRef.current = setTimeout(() => {
+          const offer = pendingOfferRef.current;
+          // Still un-accepted? (acceptCall starts the peer connection.)
+          if (!offer || pcRef.current) return;
+          try {
+            ws.send(JSON.stringify({
+              type: 'call_end',
+              to_user_id: offer.fromUserId,
+              conversation_id: offer.conversationId,
+              call_id: offer.callId,
+              reason: 'missed',
+            }));
+          } catch { /* ws may be gone; the call row is still marked below */ }
+          void updateCallApi(offer.callId, {
+            ended_at: new Date().toISOString(),
+            end_reason: 'missed',
+          }).catch(() => {});
+          void cleanupCall();
+        }, RING_TIMEOUT_MS);
       } else if (type === 'call_answer') {
-        // Our outgoing call was accepted
+        // Our outgoing call was accepted — stop ringing/re-sending.
+        clearCallTimers();
         if (pcRef.current) {
           const desc = new RTCSessionDescription({ type: 'answer', sdp: data.sdp });
           pcRef.current.setRemoteDescription(desc).then(() => {
@@ -257,7 +320,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         candidate: candidate.toJSON(),
       }));
     });
-  }, [isAuthenticated, cleanupCall]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, cleanupCall, clearCallTimers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Connect user WS when authenticated
   useEffect(() => {
@@ -352,24 +415,56 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         startedAt: Date.now(),
       });
 
-      sendSignal({
+      const offerMsg = {
         type: 'call_offer',
         to_user_id: calleeId,
         conversation_id: contact.conversationId,
         call_id: callRecord.id,
         sdp: offer.sdp,
-      });
+        // Fallback identity; the server also enriches this authoritatively.
+        caller_display_name: myDisplayName ?? undefined,
+        caller_private_number: myPrivateNumber ?? undefined,
+      };
+      outgoingOfferMsgRef.current = offerMsg;
+      sendSignal(offerMsg);
+
+      // Re-send while ringing so a recipient whose WS reconnects on
+      // foreground (after the push) still receives the offer.
+      offerResendRef.current = setInterval(() => {
+        if (outgoingOfferMsgRef.current) sendSignal(outgoingOfferMsgRef.current);
+      }, OFFER_RESEND_MS);
+
+      // Give up if unanswered. clearCallTimers() (fired on call_answer /
+      // cleanup) cancels this, so reaching here means the call never
+      // connected — mark it as a missed/no-answer call and tear down.
+      outgoingTimeoutRef.current = setTimeout(() => {
+        sendSignal({
+          type: 'call_end',
+          to_user_id: calleeId,
+          conversation_id: contact.conversationId,
+          call_id: callRecord.id,
+          reason: 'missed',
+        });
+        void updateCallApi(callRecord.id, {
+          ended_at: new Date().toISOString(),
+          end_reason: 'missed',
+        }).catch(() => {});
+        void cleanupCall();
+      }, RING_TIMEOUT_MS);
     } catch (err) {
       console.warn('[call] startOutgoingCall failed:', err);
       await cleanupCall();
     }
-  }, [callState, setCallAudioMode, createPeerConnection, sendSignal, cleanupCall]);
+  }, [callState, setCallAudioMode, createPeerConnection, sendSignal, cleanupCall, myDisplayName, myPrivateNumber]);
 
   // ── Accept incoming call ────────────────────────────────────────────────────
 
   const acceptCall = useCallback(async () => {
     const offer = pendingOfferRef.current;
     if (!offer) return;
+
+    // Picked up — stop the auto-decline ring timer.
+    clearCallTimers();
 
     try {
       await setCallAudioMode(true, false);
@@ -423,7 +518,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       console.warn('[call] acceptCall failed:', err);
       await cleanupCall();
     }
-  }, [setCallAudioMode, createPeerConnection, sendSignal, cleanupCall]);
+  }, [setCallAudioMode, createPeerConnection, sendSignal, cleanupCall, clearCallTimers]);
 
   // ── Decline incoming call ───────────────────────────────────────────────────
 

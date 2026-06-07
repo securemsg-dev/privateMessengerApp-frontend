@@ -105,22 +105,31 @@ export async function uploadEncryptedMedia(
     mime,
   });
 
-  // 3. PUT the ciphertext bytes
+  // 3. PUT the ciphertext bytes.
+  //
+  // React Native's fetch() cannot send a raw ArrayBuffer/Uint8Array body as
+  // bytes — it drops or stringifies it, so the backend receives the wrong
+  // byte count and rejects the upload. Instead we stage the ciphertext in a
+  // temp file and stream it with FileSystem.uploadAsync (BINARY_CONTENT),
+  // mirroring how downloadAndDecryptMedia uses FileSystem.downloadAsync.
   const token = await SecureStore.getItemAsync(TOKEN_KEY);
-  const resp = await fetch(reservation.upload_url, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: cipher.buffer.slice(
-      cipher.byteOffset,
-      cipher.byteOffset + cipher.byteLength,
-    ) as ArrayBuffer,
-  });
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => '');
-    throw new Error(`Media upload failed (${resp.status}): ${detail}`);
+  const dir = await ensureCacheDir();
+  const tmpUri = `${dir}${reservation.blob_id}.upload`;
+  try {
+    await writeFileBytes(tmpUri, cipher);
+    const result = await FileSystem.uploadAsync(reservation.upload_url, tmpUri, {
+      httpMethod: 'PUT',
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (result.status >= 400) {
+      throw new Error(`Media upload failed (${result.status}): ${result.body}`);
+    }
+  } finally {
+    await FileSystem.deleteAsync(tmpUri, { idempotent: true }).catch(() => {});
   }
 
   return {

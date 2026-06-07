@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   Modal,
   StyleSheet,
   Text,
@@ -9,6 +10,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
+import { useCall } from './CallProvider';
+import { createConversationApi } from '../services/api';
 
 const KEYS = [
   ['1', '2', '3'],
@@ -24,7 +27,9 @@ interface Props {
 
 export const DialpadModal = ({ visible, onClose }: Props) => {
   const { colors } = useTheme();
+  const { startOutgoingCall } = useCall();
   const [number, setNumber] = useState('');
+  const [calling, setCalling] = useState(false);
 
   const handlePress = (key: string) => setNumber((n) => n + key);
   const handleDelete = () => setNumber((n) => n.slice(0, -1));
@@ -32,6 +37,26 @@ export const DialpadModal = ({ visible, onClose }: Props) => {
   const handleClose = () => {
     setNumber('');
     onClose();
+  };
+
+  const handleCall = async () => {
+    if (number.length === 0 || calling) return;
+    setCalling(true);
+    try {
+      // create-or-get the 1:1 conversation, then ring the callee.
+      // startOutgoingCall validates the number via lookup and bails if unknown.
+      const conv = await createConversationApi(number);
+      await startOutgoingCall({
+        name: `User ${number}`,
+        number,
+        conversationId: conv.id,
+      });
+      handleClose();
+    } catch {
+      Alert.alert('Call failed', 'Could not reach that number. Check it and try again.');
+    } finally {
+      setCalling(false);
+    }
   };
 
   return (
@@ -81,9 +106,10 @@ export const DialpadModal = ({ visible, onClose }: Props) => {
           {/* Call button */}
           <View style={styles.callRow}>
             <TouchableOpacity
-              style={[styles.callBtn, { backgroundColor: '#22c55e', opacity: number.length === 0 ? 0.4 : 1 }]}
+              style={[styles.callBtn, { backgroundColor: '#22c55e', opacity: number.length === 0 || calling ? 0.4 : 1 }]}
               activeOpacity={0.8}
-              disabled={number.length === 0}
+              disabled={number.length === 0 || calling}
+              onPress={handleCall}
             >
               <Ionicons name="call" size={26} color="#fff" />
             </TouchableOpacity>

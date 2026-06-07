@@ -56,7 +56,7 @@ const labelForReason = (
   reason: CallDTO['end_reason'],
   direction: CallDirection,
 ): string => {
-  if (reason === 'missed' && direction === 'incoming') return 'Missed';
+  if (reason === 'missed') return direction === 'incoming' ? 'Missed' : 'No answer';
   if (reason === 'declined') return direction === 'incoming' ? 'Declined' : 'Declined';
   if (reason === 'cancelled') return 'Cancelled';
   if (reason === 'failed') return 'Failed';
