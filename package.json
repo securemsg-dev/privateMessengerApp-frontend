@@ -43,6 +43,7 @@
     "tweetnacl-util": "^0.15.1"
   },
   "devDependencies": {
+    "@config-plugins/react-native-webrtc": "^13.0.0",
     "@types/jest": "^29.5.14",
     "@types/react": "~19.1.10",
     "jest": "^29.7.0",

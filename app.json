@@ -61,7 +61,14 @@
           "microphonePermission": "Allow PrivaChat to access your microphone for voice messages."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Allow PrivaChat to use your camera for calls.",
+          "microphonePermission": "Allow PrivaChat to use your microphone for calls."
+        }
+      ]
     ],
     "extra": {
       "eas": {

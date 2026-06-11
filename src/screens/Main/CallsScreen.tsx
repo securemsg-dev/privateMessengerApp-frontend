@@ -16,6 +16,7 @@ import { useSelector } from 'react-redux';
 
 import { useTheme } from '../../theme/ThemeContext';
 import { CallDTO, listCallsApi } from '../../services/api';
+import { getContacts } from '../../services/database';
 import { RootState } from '../../store';
 
 type CallDirection = 'incoming' | 'outgoing';
@@ -23,12 +24,20 @@ type CallDirection = 'incoming' | 'outgoing';
 interface DisplayCall {
   id: string;
   direction: CallDirection;
-  /** UUID of the OTHER party — used as a label until we have a name lookup. */
+  /** UUID of the OTHER party — fallback label when they're not in contacts. */
   peerUserId: string | null;
+  /** Resolved from the local contacts DB (contact ids are user UUIDs). */
+  peerName: string | null;
   endReason: CallDTO['end_reason'];
   startedAt: string;
+  acceptedAt: string | null;
+  endedAt: string | null;
   durationSeconds: number | null;
 }
+
+// A call row with no end_reason that started this long ago can't still be
+// ringing — treat it as unanswered instead of "In progress" forever.
+const STALE_CALL_MS = 2 * 60_000;
 
 const formatRelative = (iso: string): string => {
   const d = new Date(iso);
@@ -52,15 +61,19 @@ const formatDuration = (secs: number): string => {
   return `${m}m ${s.toString().padStart(2, '0')}s`;
 };
 
-const labelForReason = (
-  reason: CallDTO['end_reason'],
-  direction: CallDirection,
-): string => {
+const labelForReason = (call: DisplayCall): string => {
+  const { endReason: reason, direction } = call;
   if (reason === 'missed') return direction === 'incoming' ? 'Missed' : 'No answer';
   if (reason === 'declined') return direction === 'incoming' ? 'Declined' : 'Declined';
   if (reason === 'cancelled') return 'Cancelled';
   if (reason === 'failed') return 'Failed';
   if (reason === 'completed') return 'Completed';
+  // No end reason recorded. Old rows (e.g. from a client that crashed
+  // mid-setup) can't still be live — show them as unanswered/ended.
+  const ageMs = Date.now() - new Date(call.startedAt).getTime();
+  if (ageMs > STALE_CALL_MS) {
+    return call.acceptedAt ? 'Ended' : 'Not answered';
+  }
   return 'In progress';
 };
 
@@ -78,7 +91,14 @@ export const CallsScreen = () => {
 
   const load = useCallback(async () => {
     try {
-      const rows = await listCallsApi();
+      const [rows, contactRows] = await Promise.all([
+        listCallsApi(),
+        getContacts() as Promise<{ id: string; name: string }[]>,
+      ]);
+      // Contact ids ARE user UUIDs (saved from lookup results), so call
+      // participants resolve to names directly.
+      const nameById = new Map(contactRows.map((c) => [c.id, c.name]));
+
       const display: DisplayCall[] = rows.map((c) => {
         const direction: CallDirection =
           c.caller_id === myUserId ? 'outgoing' : 'incoming';
@@ -95,8 +115,11 @@ export const CallsScreen = () => {
           id: c.id,
           direction,
           peerUserId: peer,
+          peerName: peer ? nameById.get(peer) ?? null : null,
           endReason: c.end_reason,
           startedAt: c.started_at,
+          acceptedAt: c.accepted_at,
+          endedAt: c.ended_at,
           durationSeconds: dur,
         };
       });
@@ -115,7 +138,7 @@ export const CallsScreen = () => {
 
   const renderItem = ({ item }: { item: DisplayCall }) => {
     const missed = isMissed(item.endReason, item.direction);
-    const reasonText = labelForReason(item.endReason, item.direction);
+    const reasonText = labelForReason(item);
     return (
       <View style={[styles.row, { borderBottomColor: colors.border }]}>
         <View style={[styles.avatar, { backgroundColor: colors.surface }]}>
@@ -133,7 +156,8 @@ export const CallsScreen = () => {
             ]}
             numberOfLines={1}
           >
-            {item.peerUserId ? `User ${item.peerUserId.slice(0, 8)}…` : 'Unknown'}
+            {item.peerName ??
+              (item.peerUserId ? `User ${item.peerUserId.slice(0, 8)}…` : 'Unknown')}
           </Text>
           <Text style={[styles.subLabel, { color: colors.textSecondary }]}>
             {reasonText}

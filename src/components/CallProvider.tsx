@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { AppState, AppStateStatus, View } from 'react-native';
+import { Alert, AppState, AppStateStatus, View } from 'react-native';
 import { CallScreen } from './CallScreen';
 import { IncomingCallBanner } from './IncomingCallBanner';
 import {
@@ -162,6 +162,27 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
+  // ── Microphone permission ───────────────────────────────────────────────────
+  // react-native-webrtc's getUserMedia does NOT reliably trigger the runtime
+  // permission prompt on Android — request it explicitly (same expo-av flow
+  // the voice recorder uses) so the user sees the system dialog.
+
+  const ensureMicPermission = useCallback(async (): Promise<boolean> => {
+    try {
+      const { granted } = await Audio.requestPermissionsAsync();
+      if (!granted) {
+        Alert.alert(
+          'Microphone access needed',
+          'PrivaChat needs the microphone to make voice calls. Please enable it in your system settings.',
+        );
+      }
+      return granted;
+    } catch (err) {
+      console.warn('[call] mic permission request failed:', err);
+      return false;
+    }
+  }, []);
+
   // ── Peer connection factory ─────────────────────────────────────────────────
 
   const createPeerConnection = useCallback(async () => {
@@ -306,20 +327,6 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         if (isAuthenticated) void connectUserWs();
       }, 3000);
     };
-
-    // Helper to send ICE candidates — attached as custom event handler
-    ws.addEventListener('_send_ice', (e: any) => {
-      const { candidate } = e.detail;
-      const cs = callState;
-      if (ws.readyState !== WebSocket.OPEN || !cs) return;
-      ws.send(JSON.stringify({
-        type: 'call_ice',
-        to_user_id: cs.peerUserId,
-        conversation_id: cs.conversationId,
-        call_id: cs.callId,
-        candidate: candidate.toJSON(),
-      }));
-    });
   }, [isAuthenticated, cleanupCall, clearCallTimers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Connect user WS when authenticated
@@ -362,30 +369,57 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   const startOutgoingCall = useCallback(async (contact: CallContact) => {
     if (callState) return; // already in a call
 
+    // Show the call screen IMMEDIATELY so the user gets instant feedback —
+    // callId/peerUserId are filled in as the async setup completes. endCall
+    // knows an empty callId means "setup phase" (no server row yet).
+    setCallState({
+      mode: 'outgoing',
+      callId: '',
+      peerUserId: '',
+      conversationId: contact.conversationId,
+      contactName: contact.name,
+      contactPrivateNumber: contact.number,
+      startedAt: Date.now(),
+    });
+
+    // Set on success; used by the catch to close the server row on failure
+    // so the Calls tab never accumulates eternal "In progress" entries.
+    let createdCallId: string | null = null;
+
     try {
-      // Resolve the callee's UUID from their private number
+      // 1. Mic permission first — the most common silent failure on Android.
+      if (!(await ensureMicPermission())) {
+        await cleanupCall();
+        return;
+      }
+
+      // 2. Resolve the callee's UUID from their private number
       const lookupResult = await lookupContactApi(contact.number);
       if (!lookupResult.found || !lookupResult.user) {
-        console.warn('[call] Could not look up callee');
+        Alert.alert('Call failed', 'This user is no longer on PrivaChat.');
+        await cleanupCall();
         return;
       }
       const calleeId = lookupResult.user.id;
+      setCallState((prev) => (prev ? { ...prev, peerUserId: calleeId } : prev));
 
-      // Log call in backend
+      // 3. Local media + peer connection — do this BEFORE creating the
+      //    server call row, so a failed setup never writes history.
+      await setCallAudioMode(true, false);
+
+      const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
+      localStreamRef.current = stream;
+
+      const pc = await createPeerConnection();
+      pcRef.current = pc;
+
+      // 4. Log the call in the backend now that setup can't silently fail
       const callRecord = await createCallApi({
         conversation_id: contact.conversationId,
         callee_id: calleeId,
       });
-
-      await setCallAudioMode(true, false);
-
-      // Capture mic
-      const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
-      localStreamRef.current = stream;
-
-      // Create peer connection
-      const pc = await createPeerConnection();
-      pcRef.current = pc;
+      createdCallId = callRecord.id;
+      setCallState((prev) => (prev ? { ...prev, callId: callRecord.id } : prev));
 
       // Attach ICE candidate sender with current call context
       (pc as any).onicecandidate = (event: any) => {
@@ -403,17 +437,6 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
 
       const offer = await (pc as any).createOffer({ offerToReceiveAudio: true });
       await pc.setLocalDescription(offer);
-
-      // Update call state to outgoing
-      setCallState({
-        mode: 'outgoing',
-        callId: callRecord.id,
-        peerUserId: calleeId,
-        conversationId: contact.conversationId,
-        contactName: contact.name,
-        contactPrivateNumber: contact.number,
-        startedAt: Date.now(),
-      });
 
       const offerMsg = {
         type: 'call_offer',
@@ -453,9 +476,22 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       }, RING_TIMEOUT_MS);
     } catch (err) {
       console.warn('[call] startOutgoingCall failed:', err);
+      // Close the server row so the Calls tab doesn't show "In progress" forever
+      if (createdCallId) {
+        void updateCallApi(createdCallId, {
+          ended_at: new Date().toISOString(),
+          end_reason: 'failed',
+        }).catch(() => {});
+      }
+      Alert.alert(
+        'Call failed',
+        err instanceof Error && err.message
+          ? err.message
+          : 'Could not start the call. Please try again.',
+      );
       await cleanupCall();
     }
-  }, [callState, setCallAudioMode, createPeerConnection, sendSignal, cleanupCall, myDisplayName, myPrivateNumber]);
+  }, [callState, ensureMicPermission, setCallAudioMode, createPeerConnection, sendSignal, cleanupCall, myDisplayName, myPrivateNumber]);
 
   // ── Accept incoming call ────────────────────────────────────────────────────
 
@@ -467,6 +503,23 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     clearCallTimers();
 
     try {
+      if (!(await ensureMicPermission())) {
+        // Can't take the call without a mic — tell the caller we're out.
+        sendSignal({
+          type: 'call_end',
+          to_user_id: offer.fromUserId,
+          conversation_id: offer.conversationId,
+          call_id: offer.callId,
+          reason: 'failed',
+        });
+        void updateCallApi(offer.callId, {
+          ended_at: new Date().toISOString(),
+          end_reason: 'failed',
+        }).catch(() => {});
+        await cleanupCall();
+        return;
+      }
+
       await setCallAudioMode(true, false);
 
       const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
@@ -516,9 +569,27 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       );
     } catch (err) {
       console.warn('[call] acceptCall failed:', err);
+      // Tell the caller + close the row so neither side shows "In progress"
+      sendSignal({
+        type: 'call_end',
+        to_user_id: offer.fromUserId,
+        conversation_id: offer.conversationId,
+        call_id: offer.callId,
+        reason: 'failed',
+      });
+      void updateCallApi(offer.callId, {
+        ended_at: new Date().toISOString(),
+        end_reason: 'failed',
+      }).catch(() => {});
+      Alert.alert(
+        'Call failed',
+        err instanceof Error && err.message
+          ? err.message
+          : 'Could not answer the call. Please try again.',
+      );
       await cleanupCall();
     }
-  }, [setCallAudioMode, createPeerConnection, sendSignal, cleanupCall, clearCallTimers]);
+  }, [ensureMicPermission, setCallAudioMode, createPeerConnection, sendSignal, cleanupCall, clearCallTimers]);
 
   // ── Decline incoming call ───────────────────────────────────────────────────
 
@@ -547,6 +618,12 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   const endCall = useCallback(async (reason = 'completed') => {
     const cs = callState;
     if (!cs) return;
+    // Hung up while setup was still in flight (no server row, peer never
+    // signaled) — just tear down locally.
+    if (!cs.callId) {
+      await cleanupCall();
+      return;
+    }
     sendSignal({
       type: 'call_end',
       to_user_id: cs.peerUserId,
