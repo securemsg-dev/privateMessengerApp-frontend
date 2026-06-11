@@ -22,6 +22,7 @@ import {
   createConversationApi,
   lookupContactApi,
 } from '../../services/api';
+import { saveContact } from '../../services/database';
 
 const formatNumber = (raw: string): string => {
   const d = raw.replace(/\D/g, '').slice(0, 10);
@@ -68,6 +69,14 @@ export const StartChatScreen = () => {
       // 2. Create-or-fetch the conversation server-side
       const conv = await createConversationApi(rawDigits);
       const other = conv.other_participant ?? lookup.user;
+
+      // Remember them locally so they show up in the Contacts tab.
+      await saveContact(
+        other.id,
+        other.display_name || formatNumber(other.private_number),
+        other.private_number,
+        true,
+      );
 
       navigation.navigate('ChatScreen', {
         conversationId: conv.id,

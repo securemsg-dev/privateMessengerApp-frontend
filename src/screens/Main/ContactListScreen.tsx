@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,23 +6,56 @@ import {
   TouchableOpacity,
   TextInput,
   SectionList,
+  Modal,
+  Alert,
+  Share,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { useNavigation } from '@react-navigation/native';
+import { useSelector } from 'react-redux';
+
 import { useTheme } from '../../theme/ThemeContext';
+import { RootState } from '../../store';
+import {
+  ApiError,
+  createConversationApi,
+  lookupContactApi,
+} from '../../services/api';
+import {
+  getContacts,
+  saveContact,
+  deleteContact,
+} from '../../services/database';
 
 interface Contact {
   id: string;
   name: string;
-  phone: string;
-  isRegistered: boolean;
+  /** The contact's 10-digit PrivaChat private number (stored in the legacy `phone` column). */
+  privateNumber: string;
 }
+
+interface ContactRow {
+  id: string;
+  name: string;
+  phone: string;
+}
+
+const formatNumber = (raw: string): string => {
+  const d = raw.replace(/\D/g, '').slice(0, 10);
+  if (d.length <= 2) return d;
+  if (d.length <= 6) return `${d.slice(0, 2)}-${d.slice(2)}`;
+  return `${d.slice(0, 2)}-${d.slice(2, 6)}-${d.slice(6)}`;
+};
 
 function groupByLetter(contacts: Contact[]) {
   const map: Record<string, Contact[]> = {};
   contacts.forEach((c) => {
-    const letter = c.name ? c.name.charAt(0).toUpperCase() : '#';
+    const letter = /^[a-z]/i.test(c.name) ? c.name.charAt(0).toUpperCase() : '#';
     if (!map[letter]) map[letter] = [];
     map[letter].push(c);
   });
@@ -33,55 +66,184 @@ function groupByLetter(contacts: Contact[]) {
 
 export const ContactListScreen = () => {
   const { colors, isDark } = useTheme();
+  const navigation = useNavigation<any>();
+  const myPrivateNumber = useSelector((s: RootState) => s.auth.privateNumber);
+
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+
+  // Add-contact modal state
+  const [addVisible, setAddVisible] = useState(false);
+  const [digits, setDigits] = useState('');
+  const [addBusy, setAddBusy] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
+  const refreshContacts = useCallback(async () => {
+    const rows = (await getContacts()) as ContactRow[];
+    setContacts(
+      rows
+        .map((r) => ({
+          id: r.id,
+          name: r.name || formatNumber(r.phone),
+          privateNumber: r.phone,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    );
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
-    const fetchContacts = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      setContacts([
-        { id: '1', name: 'Alice Smith', phone: '+1 234 567 890', isRegistered: true },
-        { id: '2', name: 'Bob Jones', phone: '+1 098 765 432', isRegistered: false },
-        { id: '3', name: 'Carlos Ruiz', phone: '+60 12-345 6789', isRegistered: true },
-        { id: '4', name: 'Dana Lee', phone: '+60 19-876 5432', isRegistered: false },
-        { id: '5', name: 'Eve Chen', phone: '+60 11-123 4567', isRegistered: true },
-      ]);
-      setLoading(false);
-    };
-    fetchContacts();
-  }, []);
+    refreshContacts();
+  }, [refreshContacts]);
 
   const filtered = useMemo(
     () =>
       contacts.filter(
         (c) =>
           c.name.toLowerCase().includes(search.toLowerCase()) ||
-          c.phone.includes(search)
+          c.privateNumber.includes(search.replace(/\D/g, '')),
       ),
-    [contacts, search]
+    [contacts, search],
   );
 
   const sections = useMemo(() => groupByLetter(filtered), [filtered]);
+
+  /* ── Add contact ────────────────────────────────────────────────────── */
+
+  const rawDigits = digits.replace(/\D/g, '').slice(0, 10);
+  const isValidNumber = rawDigits.length === 10 && rawDigits !== myPrivateNumber;
+
+  const openAddModal = () => {
+    setDigits('');
+    setAddError(null);
+    setAddVisible(true);
+  };
+
+  const handleAddContact = async () => {
+    if (!isValidNumber || addBusy) return;
+    setAddBusy(true);
+    setAddError(null);
+    try {
+      const lookup = await lookupContactApi(rawDigits);
+      if (!lookup.found || !lookup.user) {
+        setAddError('No PrivaChat user with that number');
+        return;
+      }
+      const user = lookup.user;
+      await saveContact(
+        user.id,
+        user.display_name || formatNumber(user.private_number),
+        user.private_number,
+        true,
+      );
+      setAddVisible(false);
+      await refreshContacts();
+    } catch (err) {
+      setAddError(
+        err instanceof ApiError ? err.detail : 'Could not look up that number',
+      );
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
+  /* ── Open chat / remove ─────────────────────────────────────────────── */
+
+  const handleOpenChat = async (contact: Contact) => {
+    if (openingId) return;
+    setOpeningId(contact.id);
+    try {
+      // Fresh lookup so we always carry the contact's current public key
+      // (required for E2EE) and latest display name into the chat.
+      const lookup = await lookupContactApi(contact.privateNumber);
+      if (!lookup.found || !lookup.user) {
+        Alert.alert(
+          'Contact unavailable',
+          'This user no longer exists on PrivaChat. Remove them from your contacts?',
+          [
+            { text: 'Keep', style: 'cancel' },
+            {
+              text: 'Remove',
+              style: 'destructive',
+              onPress: async () => {
+                await deleteContact(contact.id);
+                await refreshContacts();
+              },
+            },
+          ],
+        );
+        return;
+      }
+      const conv = await createConversationApi(contact.privateNumber);
+      const other = conv.other_participant ?? lookup.user;
+      navigation.navigate('ChatScreen', {
+        conversationId: conv.id,
+        contactName: other.display_name || formatNumber(other.private_number),
+        contactPrivateNumber: other.private_number,
+        contactPublicKey: other.public_key ?? null,
+        isSelfChat: false,
+      });
+    } catch (err) {
+      Alert.alert(
+        'Could not open chat',
+        err instanceof ApiError ? err.detail : 'Check your connection and try again.',
+      );
+    } finally {
+      setOpeningId(null);
+    }
+  };
+
+  const handleLongPress = (contact: Contact) => {
+    Alert.alert('Remove contact', `Remove ${contact.name} from your contacts?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteContact(contact.id);
+          await refreshContacts();
+        },
+      },
+    ]);
+  };
+
+  const handleShareNumber = async () => {
+    if (!myPrivateNumber) return;
+    try {
+      await Share.share({
+        message: `Add me on PrivaChat — my private number is ${formatNumber(myPrivateNumber)}`,
+      });
+    } catch {
+      /* user dismissed the share sheet */
+    }
+  };
+
+  /* ── Render ─────────────────────────────────────────────────────────── */
 
   const renderItem = ({ item }: { item: Contact }) => (
     <TouchableOpacity
       style={[styles.contactItem, { borderBottomColor: colors.border }]}
       activeOpacity={0.7}
+      onPress={() => handleOpenChat(item)}
+      onLongPress={() => handleLongPress(item)}
     >
       <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-        <Text style={styles.avatarText}>{item.name.charAt(0)}</Text>
+        <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
       </View>
       <View style={styles.contactInfo}>
         <Text style={[styles.contactName, { color: colors.text }]} numberOfLines={1}>
           {item.name}
         </Text>
-        <Text style={[styles.contactPhone, { color: colors.textSecondary }]}>{item.phone}</Text>
+        <Text style={[styles.contactPhone, { color: colors.textSecondary }]}>
+          {formatNumber(item.privateNumber)}
+        </Text>
       </View>
-      {!item.isRegistered && (
-        <TouchableOpacity style={[styles.inviteBtn, { borderColor: colors.primary }]}>
-          <Text style={[styles.inviteBtnText, { color: colors.primary }]}>Invite</Text>
-        </TouchableOpacity>
+      {openingId === item.id ? (
+        <ActivityIndicator size="small" color={colors.primary} />
+      ) : (
+        <Ionicons name="chatbubble-outline" size={20} color={colors.textSecondary} />
       )}
     </TouchableOpacity>
   );
@@ -101,11 +263,11 @@ export const ContactListScreen = () => {
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Contacts</Text>
           <View style={styles.headerRight}>
-            <TouchableOpacity style={styles.headerIcon}>
-              <Ionicons name="funnel-outline" size={20} color={colors.textSecondary} />
+            <TouchableOpacity style={styles.headerIcon} onPress={handleShareNumber}>
+              <Ionicons name="share-outline" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.headerIcon}>
-              <Ionicons name="ellipsis-vertical" size={20} color={colors.textSecondary} />
+            <TouchableOpacity style={styles.headerIcon} onPress={openAddModal}>
+              <Ionicons name="person-add-outline" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         </View>
@@ -138,9 +300,7 @@ export const ContactListScreen = () => {
         ListEmptyComponent={
           loading ? (
             <View style={styles.emptyLoading}>
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                Syncing contacts securely...
-              </Text>
+              <ActivityIndicator color={colors.primary} />
             </View>
           ) : search.length > 0 ? (
             <View style={styles.emptyLoading}>
@@ -164,6 +324,7 @@ export const ContactListScreen = () => {
               <TouchableOpacity
                 style={[styles.primaryPill, { backgroundColor: colors.primary }]}
                 activeOpacity={0.85}
+                onPress={openAddModal}
               >
                 <Ionicons name="add" size={18} color="#fff" />
                 <Text style={styles.primaryPillText}>Add a contact</Text>
@@ -172,6 +333,7 @@ export const ContactListScreen = () => {
               <TouchableOpacity
                 style={[styles.secondaryPill, { borderColor: colors.primary, backgroundColor: colors.background }]}
                 activeOpacity={0.85}
+                onPress={handleShareNumber}
               >
                 <Ionicons name="shield-outline" size={16} color={colors.primary} />
                 <Text style={[styles.secondaryPillText, { color: colors.primary }]}>
@@ -205,9 +367,83 @@ export const ContactListScreen = () => {
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: colors.primary }]}
         activeOpacity={0.85}
+        onPress={openAddModal}
       >
         <Ionicons name="person-add-outline" size={24} color="#fff" />
       </TouchableOpacity>
+
+      {/* Add-contact modal */}
+      <Modal
+        visible={addVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAddVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={[styles.modalCard, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Add contact</Text>
+            <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
+              Enter their 10-digit private number
+            </Text>
+            <TextInput
+              style={[
+                styles.modalInput,
+                {
+                  color: colors.text,
+                  borderBottomColor: rawDigits.length > 0 ? colors.primary : colors.border,
+                },
+              ]}
+              value={formatNumber(rawDigits)}
+              onChangeText={(v) => {
+                setDigits(v.replace(/\D/g, '').slice(0, 10));
+                if (addError) setAddError(null);
+              }}
+              keyboardType="number-pad"
+              placeholder="00-0000-0000"
+              placeholderTextColor={colors.textSecondary}
+              autoFocus
+              maxLength={12}
+            />
+            {rawDigits === myPrivateNumber && rawDigits.length === 10 && (
+              <Text style={[styles.modalError, { color: colors.error }]}>
+                That's your own number
+              </Text>
+            )}
+            {addError && (
+              <Text style={[styles.modalError, { color: colors.error }]}>{addError}</Text>
+            )}
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalBtn}
+                onPress={() => setAddVisible(false)}
+                disabled={addBusy}
+              >
+                <Text style={[styles.modalBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modalBtn,
+                  styles.modalBtnPrimary,
+                  {
+                    backgroundColor: isValidNumber ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={handleAddContact}
+                disabled={!isValidNumber || addBusy}
+              >
+                {addBusy ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={[styles.modalBtnText, { color: '#fff' }]}>Add</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 };
@@ -261,13 +497,6 @@ const styles = StyleSheet.create({
   contactInfo: { flex: 1 },
   contactName: { fontSize: 16, fontWeight: '600', marginBottom: 3 },
   contactPhone: { fontSize: 14 },
-  inviteBtn: {
-    borderWidth: 1,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  inviteBtnText: { fontSize: 13, fontWeight: '600' },
   emptyLoading: { alignItems: 'center', paddingTop: 80 },
   emptyText: { fontSize: 15 },
   emptyOnboard: {
@@ -362,4 +591,43 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
   },
+  /* Add-contact modal */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  modalCard: {
+    width: '100%',
+    borderRadius: 20,
+    padding: 22,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 4 },
+  modalSubtitle: { fontSize: 13, marginBottom: 18 },
+  modalInput: {
+    fontSize: 24,
+    fontWeight: '600',
+    textAlign: 'center',
+    letterSpacing: 2,
+    borderBottomWidth: 2,
+    paddingVertical: 10,
+  },
+  modalError: { fontSize: 13, marginTop: 10, textAlign: 'center' },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 22,
+  },
+  modalBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: 22,
+    minWidth: 84,
+    alignItems: 'center',
+  },
+  modalBtnPrimary: {},
+  modalBtnText: { fontSize: 15, fontWeight: '700' },
 });

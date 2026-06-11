@@ -1,7 +1,12 @@
 import { Alert } from 'react-native';
 import { MutableRefObject } from 'react';
 import { AppDispatch } from '../store';
-import { mediaPlaceholder, MessageType, sendMessageThunk } from '../store/slices/chatSlice';
+import {
+  mediaPlaceholder,
+  MessageType,
+  sendMessageThunk,
+  updateMessageStatus,
+} from '../store/slices/chatSlice';
 import { ChatSocket } from '../services/socket';
 import { encryptMessage } from '../services/crypto';
 import { uploadEncryptedMedia } from '../services/media';
@@ -39,16 +44,29 @@ export function useMediaSender(
     if (isSelfChat) return;
 
     try {
+      // E2EE is mandatory: never send the media envelope in plaintext —
+      // it contains the symmetric key for the uploaded blob.
+      const peerKey = peerPublicKeyRef.current;
+      if (!peerKey) {
+        dispatch(updateMessageStatus({ id: localId, status: 'failed' }));
+        Alert.alert(
+          'Media not sent',
+          "This contact's encryption key isn't available yet. Check your connection and try again.",
+        );
+        return;
+      }
       const { envelope } = await uploadEncryptedMedia(localUri, mime);
-      let payload = JSON.stringify(envelope);
-      if (peerPublicKeyRef.current) {
-        try {
-          payload = await encryptMessage(payload, peerPublicKeyRef.current);
-        } catch (err) {
-          console.warn('[crypto] media envelope encrypt failed:', err);
-        }
-      } else {
-        console.warn('[crypto] no peer public key; envelope sent in plaintext');
+      let payload: string;
+      try {
+        payload = await encryptMessage(JSON.stringify(envelope), peerKey);
+      } catch (err) {
+        if (__DEV__) console.warn('[crypto] envelope encrypt failed; not sending:', err);
+        dispatch(updateMessageStatus({ id: localId, status: 'failed' }));
+        Alert.alert(
+          'Media not sent',
+          'The attachment could not be encrypted, so it was not sent.',
+        );
+        return;
       }
       const wireType: 'text' | 'voice' | 'image' | 'document' =
         msgType === 'voice' ? 'voice' : msgType === 'document' ? 'document' : 'image';
@@ -59,7 +77,8 @@ export function useMediaSender(
         client_temp_id: localId,
       });
     } catch (err) {
-      console.warn('[media] upload failed, message not delivered:', err);
+      if (__DEV__) console.warn('[media] upload failed, message not delivered:', err);
+      dispatch(updateMessageStatus({ id: localId, status: 'failed' }));
       Alert.alert(
         'Upload failed',
         'Your media was saved locally but could not be sent. Tap and hold to retry later.',

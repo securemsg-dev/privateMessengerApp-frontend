@@ -60,7 +60,7 @@ export interface Message {
   type: MessageType;
   mediaUri?: string;
   timestamp: string;
-  status: 'sent' | 'delivered' | 'read';
+  status: 'sent' | 'delivered' | 'read' | 'failed';
 
   // Phase C.2 — per-message metadata
   reactions: MessageReaction[];

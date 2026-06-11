@@ -21,6 +21,7 @@ interface Colors {
   primary: string;
   background: string;
   error?: string;
+  danger?: string;
 }
 
 interface Props {
@@ -374,13 +375,19 @@ export const MessageBubble = React.memo(
                 <Text
                   style={{
                     color:
-                      item.status === 'read' ? colors.primary : colors.textSecondary,
+                      item.status === 'read'
+                        ? colors.primary
+                        : item.status === 'failed'
+                        ? colors.danger ?? colors.error ?? '#e74c3c'
+                        : colors.textSecondary,
                   }}
                 >
                   {item.status === 'sent'
                     ? 'SENT'
                     : item.status === 'delivered'
                     ? 'DELIVERED'
+                    : item.status === 'failed'
+                    ? 'NOT SENT'
                     : 'READ'}
                 </Text>
               </>

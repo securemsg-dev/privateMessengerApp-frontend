@@ -1,6 +1,12 @@
 import { MutableRefObject, useState } from 'react';
+import { Alert } from 'react-native';
 import { AppDispatch } from '../store';
-import { Message, ReplyPreview, sendMessageThunk } from '../store/slices/chatSlice';
+import {
+  Message,
+  ReplyPreview,
+  sendMessageThunk,
+  updateMessageStatus,
+} from '../store/slices/chatSlice';
 import { ChatSocket } from '../services/socket';
 import { encryptMessage } from '../services/crypto';
 import { ReplyContext } from '../components/QuoteBar';
@@ -56,15 +62,27 @@ export function useTextSender(
 
     if (!isSelfChat) {
       void (async () => {
-        let payload = trimmed;
-        if (peerPublicKeyRef.current) {
-          try {
-            payload = await encryptMessage(trimmed, peerPublicKeyRef.current);
-          } catch (err) {
-            console.warn('[crypto] encrypt failed, sending plaintext:', err);
-          }
-        } else {
-          console.warn('[crypto] No peer public key; sending plaintext');
+        // E2EE is mandatory: never fall back to plaintext over the wire.
+        const peerKey = peerPublicKeyRef.current;
+        if (!peerKey) {
+          dispatch(updateMessageStatus({ id: localId, status: 'failed' }));
+          Alert.alert(
+            'Message not sent',
+            "This contact's encryption key isn't available yet. Check your connection and try again.",
+          );
+          return;
+        }
+        let payload: string;
+        try {
+          payload = await encryptMessage(trimmed, peerKey);
+        } catch (err) {
+          if (__DEV__) console.warn('[crypto] encrypt failed; not sending:', err);
+          dispatch(updateMessageStatus({ id: localId, status: 'failed' }));
+          Alert.alert(
+            'Message not sent',
+            'The message could not be encrypted, so it was not sent.',
+          );
+          return;
         }
         socketRef.current?.send({
           type: 'message',

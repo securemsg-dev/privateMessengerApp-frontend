@@ -59,6 +59,17 @@ export const saveContact = async (id: string, name: string, phone: string, isReg
   }
 };
 
+export const deleteContact = async (id: string) => {
+  if (!db) return;
+  try {
+    const statement = await db.prepareAsync('DELETE FROM contacts WHERE id = ?');
+    await statement.executeAsync([id]);
+    await statement.finalizeAsync();
+  } catch (error) {
+    console.error('Failed to delete contact', error);
+  }
+};
+
 export const getContacts = async () => {
   if (!db) return [];
   try {
