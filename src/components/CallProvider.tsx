@@ -187,7 +187,16 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
 
   const createPeerConnection = useCallback(async () => {
     const { ice_servers } = await getWebRtcConfigApi();
-    const pc = new RTCPeerConnection({ iceServers: ice_servers } as any);
+    // Native RTCPeerConnection (Android) throws "username == null" if an
+    // entry carries username/credential keys with null values — only pass
+    // the keys that actually have a value.
+    const iceServers = ice_servers.map((s: any) => {
+      const entry: Record<string, unknown> = { urls: s.urls };
+      if (s.username) entry.username = s.username;
+      if (s.credential) entry.credential = s.credential;
+      return entry;
+    });
+    const pc = new RTCPeerConnection({ iceServers } as any);
 
     (pc as any).ontrack = (_event: any) => {
       console.log('[call] Remote track received');
