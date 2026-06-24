@@ -71,6 +71,11 @@ export const AppLockScreen = () => {
     const result = await dispatch(unlockAppThunk({ password }));
     if (unlockAppThunk.fulfilled.match(result)) {
       if (result.payload.kind === 'deleted') {
+        // INTENTIONAL: no confirmation dialog here. The delete-password is a
+        // duress/panic wipe — entering it must silently destroy the account.
+        // A "are you sure?" prompt would defeat the feature under coercion
+        // (it would reveal the wipe and let the coercer cancel). Do NOT add a
+        // confirmation step to this branch.
         setPassword('');
         setWipeState('executed');
         transitionTimer.current = setTimeout(() => {
