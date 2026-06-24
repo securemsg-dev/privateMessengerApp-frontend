@@ -85,12 +85,16 @@ interface ChatState {
   conversations: Conversation[];
   activeMessages: Message[];
   status: 'idle' | 'loading';
+  /** Conversation the user is currently viewing (ChatScreen open). Drives
+   *  whether an incoming message_notification bumps the unread counter. */
+  activeConversationId: string | null;
 }
 
 const initialState: ChatState = {
   conversations: [],
   activeMessages: [],
   status: 'idle',
+  activeConversationId: null,
 };
 
 const isSelfChatId = (conversationId: string) =>
@@ -454,6 +458,37 @@ const chatSlice = createSlice({
       }
     },
 
+    /** Track which conversation is on-screen (set by ChatScreen on focus). */
+    setActiveConversation(state, action: PayloadAction<string | null>) {
+      state.activeConversationId = action.payload;
+    },
+
+    /**
+     * Apply a live `message_notification` (delivered over the user channel
+     * when a message lands in a conversation the user isn't actively viewing).
+     * Updates the list preview/time and bumps unread unless it's the open
+     * chat. The caller decrypts the preview before dispatching.
+     */
+    applyMessageNotification(
+      state,
+      action: PayloadAction<{
+        conversationId: string;
+        preview: string;
+        messageType: MessageType;
+        timestamp: string;
+      }>,
+    ) {
+      const { conversationId, preview, messageType, timestamp } = action.payload;
+      const conv = state.conversations.find((c) => c.id === conversationId);
+      if (!conv) return; // unknown conversation — hook triggers a list refresh
+      conv.lastMessage = preview;
+      conv.lastMessageType = messageType;
+      conv.lastMessageTime = timestamp;
+      if (conversationId !== state.activeConversationId) {
+        conv.unreadCount += 1;
+      }
+    },
+
     /**
      * Apply an incoming reaction WS event to the matching message. Caller
      * must compute `byMe` (we don't have access to current user state in
@@ -603,6 +638,8 @@ export const {
   upsertMessage,
   updateMessageStatus,
   mergeConversation,
+  setActiveConversation,
+  applyMessageNotification,
   removeConversation,
   applyReactionEvent,
   setMessageStarred,

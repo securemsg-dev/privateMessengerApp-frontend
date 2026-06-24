@@ -17,6 +17,7 @@ import { AppLockScreen } from '../screens/Auth/AppLockScreen';
 import { useTheme } from '../theme/ThemeContext';
 import { ensureKeyPairFor, getPublicKey } from '../services/crypto';
 import { uploadPublicKeyApi, registerDeviceApi } from '../services/api';
+import { useMessageNotifications } from '../hooks/useMessageNotifications';
 import * as Notifications from 'expo-notifications';
 
 // Show notifications when app is foregrounded (banner + sound).
@@ -26,7 +27,7 @@ Notifications.setNotificationHandler({
     shouldShowBanner: true,
     shouldShowList: true,
     shouldPlaySound: true,
-    shouldSetBadge: false,
+    shouldSetBadge: true,
   }),
 });
 
@@ -84,6 +85,28 @@ export const RootNavigator = () => {
     let cancelled = false;
     (async () => {
       try {
+        // Android needs an explicit high-importance channel or heads-up
+        // banners (and sound) won't show. Must exist before notifications
+        // arrive; the backend tags message pushes with channelId "messages".
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('messages', {
+            name: 'Messages',
+            importance: Notifications.AndroidImportance.MAX,
+            sound: 'default',
+            vibrationPattern: [0, 250, 250, 250],
+            lockscreenVisibility:
+              Notifications.AndroidNotificationVisibility.PRIVATE,
+          });
+          await Notifications.setNotificationChannelAsync('calls', {
+            name: 'Calls',
+            importance: Notifications.AndroidImportance.MAX,
+            sound: 'default',
+            vibrationPattern: [0, 500, 500, 500],
+            lockscreenVisibility:
+              Notifications.AndroidNotificationVisibility.PUBLIC,
+          });
+        }
+
         const { status: existing } = await Notifications.getPermissionsAsync();
         let finalStatus = existing;
         if (existing !== 'granted') {
@@ -145,6 +168,18 @@ export const RootNavigator = () => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
     return () => sub.remove();
   }, [appLocked]);
+
+  // Keep the conversation list live from the per-user socket (reorder, unread,
+  // last-message preview) even when the user isn't inside that chat.
+  useMessageNotifications();
+
+  // Keep the app-icon badge in sync with total unread across conversations.
+  const totalUnread = useSelector((s: RootState) =>
+    s.chat.conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
+  );
+  useEffect(() => {
+    Notifications.setBadgeCountAsync(totalUnread).catch(() => {});
+  }, [totalUnread]);
 
   if (isInitializing) {
     return (

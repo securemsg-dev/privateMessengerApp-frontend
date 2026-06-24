@@ -29,6 +29,7 @@ import {
   updateCallApi,
 } from '../services/api';
 import * as SecureStore from '../utils/secureStorage';
+import { userSocketBus } from '../services/userSocketBus';
 
 // How long an unanswered call rings before it auto-cancels (caller) / is
 // marked missed (callee). Matches the standard ~30s phone-app behaviour.
@@ -323,6 +324,10 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       } else if (type === 'call_end') {
         // Peer hung up or call was cancelled
         void cleanupCall();
+      } else {
+        // Non-call frame (e.g. message_notification) — hand off to the bus so
+        // chat features can react without coupling into the call layer.
+        userSocketBus.emit(data);
       }
     };
 

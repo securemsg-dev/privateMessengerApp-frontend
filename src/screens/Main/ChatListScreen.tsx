@@ -123,7 +123,14 @@ export const ChatListScreen = () => {
   // Sort: pinned chats float to the top, otherwise keep server-given order.
   const sortedConvs = useMemo(() => {
     const arr = [...regular];
-    arr.sort((a, b) => Number(b.isPinned) - Number(a.isPinned));
+    // Pinned first, then most-recent message on top so live updates reorder.
+    arr.sort((a, b) => {
+      if (a.isPinned !== b.isPinned) return Number(b.isPinned) - Number(a.isPinned);
+      return (
+        new Date(b.lastMessageTime).getTime() -
+        new Date(a.lastMessageTime).getTime()
+      );
+    });
     return arr;
   }, [regular]);
 

@@ -15,6 +15,8 @@ import { useTheme } from '../../theme/ThemeContext';
 import { RootState, AppDispatch } from '../../store';
 import {
   loadMessagesThunk,
+  mergeConversation,
+  setActiveConversation,
 } from '../../store/slices/chatSlice';
 import { AttachmentTray } from '../../components/AttachmentTray';
 import { QuoteBar } from '../../components/QuoteBar';
@@ -127,6 +129,17 @@ export const ChatScreen = () => {
       dispatch(loadMessagesThunk({ conversationId, peerPublicKey }));
     }
   }, [conversationId, peerPublicKey, isSelfChat, dispatch]);
+
+  // Mark this conversation active while open so incoming message_notifications
+  // don't bump its unread counter (and clear unread now that it's read). On
+  // unmount, release it so future messages here count as unread again.
+  useEffect(() => {
+    dispatch(setActiveConversation(conversationId));
+    dispatch(mergeConversation({ id: conversationId, patch: { unreadCount: 0, manualUnread: false } }));
+    return () => {
+      dispatch(setActiveConversation(null));
+    };
+  }, [conversationId, dispatch]);
 
   // Unload playback sound on unmount
   useEffect(() => {
