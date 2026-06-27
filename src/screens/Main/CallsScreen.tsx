@@ -24,10 +24,12 @@ type CallDirection = 'incoming' | 'outgoing';
 interface DisplayCall {
   id: string;
   direction: CallDirection;
-  /** UUID of the OTHER party — fallback label when they're not in contacts. */
+  /** UUID of the OTHER party — last-resort label when nothing else resolves. */
   peerUserId: string | null;
-  /** Resolved from the local contacts DB (contact ids are user UUIDs). */
+  /** Display name: server-resolved (users table) or local contacts override. */
   peerName: string | null;
+  /** The peer's private number, resolved server-side — formatted as fallback. */
+  peerPrivateNumber: string | null;
   endReason: CallDTO['end_reason'];
   startedAt: string;
   acceptedAt: string | null;
@@ -38,6 +40,14 @@ interface DisplayCall {
 // A call row with no end_reason that started this long ago can't still be
 // ringing — treat it as unanswered instead of "In progress" forever.
 const STALE_CALL_MS = 2 * 60_000;
+
+// Mirror the XX-XXXX-XXXX private-number grouping used across the app.
+const formatNumber = (raw: string): string => {
+  const d = raw.replace(/\D/g, '').slice(0, 10);
+  if (d.length <= 2) return d;
+  if (d.length <= 6) return `${d.slice(0, 2)}-${d.slice(2)}`;
+  return `${d.slice(0, 2)}-${d.slice(2, 6)}-${d.slice(6)}`;
+};
 
 const formatRelative = (iso: string): string => {
   const d = new Date(iso);
@@ -115,7 +125,10 @@ export const CallsScreen = () => {
           id: c.id,
           direction,
           peerUserId: peer,
-          peerName: peer ? nameById.get(peer) ?? null : null,
+          // Prefer a local contact alias, then the server-resolved name.
+          peerName:
+            (peer ? nameById.get(peer) : null) ?? c.peer_display_name ?? null,
+          peerPrivateNumber: c.peer_private_number ?? null,
           endReason: c.end_reason,
           startedAt: c.started_at,
           acceptedAt: c.accepted_at,
@@ -156,8 +169,10 @@ export const CallsScreen = () => {
             ]}
             numberOfLines={1}
           >
-            {item.peerName ??
-              (item.peerUserId ? `User ${item.peerUserId.slice(0, 8)}…` : 'Unknown')}
+            {item.peerName ||
+              (item.peerPrivateNumber
+                ? formatNumber(item.peerPrivateNumber)
+                : 'Unknown')}
           </Text>
           <Text style={[styles.subLabel, { color: colors.textSecondary }]}>
             {reasonText}

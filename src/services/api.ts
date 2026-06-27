@@ -521,6 +521,10 @@ export interface CallRecord {
   accepted_at: string | null;
   ended_at: string | null;
   end_reason: string | null;
+  // The other party (resolved server-side from the users table) so the Calls
+  // tab can show a real name instead of a truncated UUID.
+  peer_display_name: string | null;
+  peer_private_number: string | null;
 }
 
 export function createCallApi(body: {

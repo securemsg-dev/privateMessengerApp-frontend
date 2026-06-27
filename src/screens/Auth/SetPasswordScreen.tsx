@@ -552,6 +552,7 @@ const PasswordField = ({
       placeholder={placeholder}
       placeholderTextColor={colors.textSecondary}
       secureTextEntry={!show}
+      keyboardType="number-pad"
       value={value}
       onChangeText={onChangeText}
     />

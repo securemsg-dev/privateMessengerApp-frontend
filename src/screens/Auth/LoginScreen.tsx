@@ -146,6 +146,7 @@ export const LoginScreen = () => {
             placeholder="Password"
             placeholderTextColor={colors.textSecondary}
             secureTextEntry={!showPassword}
+            keyboardType="number-pad"
             value={password}
             onChangeText={setPassword}
           />

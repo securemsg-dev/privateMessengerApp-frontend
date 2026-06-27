@@ -108,6 +108,10 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   // Non-state refs (avoid unnecessary re-renders)
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<any>(null);
+  const remoteStreamRef = useRef<any>(null);
+  // Lets the peer-connection event handlers (created before endCall exists)
+  // tear a call down on terminal ICE failure without a dependency cycle.
+  const endCallRef = useRef<(reason?: string) => Promise<void>>(async () => {});
   const userWsRef = useRef<WebSocket | null>(null);
   const pendingIceRef = useRef<RTCIceCandidate[]>([]);
   // Store incoming offer before user accepts
@@ -199,13 +203,35 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     });
     const pc = new RTCPeerConnection({ iceServers } as any);
 
-    (pc as any).ontrack = (_event: any) => {
+    // Retain the remote stream so its audio track stays alive for playback.
+    // (react-native-webrtc auto-plays remote audio; holding the ref also
+    // future-proofs video and guarantees the track isn't GC'd mid-call.)
+    (pc as any).ontrack = (event: any) => {
       console.log('[call] Remote track received');
+      const [stream] = event.streams ?? [];
+      if (stream) remoteStreamRef.current = stream;
     };
 
+    // The UI must reflect whether MEDIA actually flows — not just that the
+    // answer SDP arrived. Promote to "connected" only once ICE establishes,
+    // and tear the call down if it permanently fails (e.g. no TURN relay).
+    const onIceState = () => {
+      const state = (pc as any).iceConnectionState;
+      console.log('[call] ICE state:', state);
+      if (state === 'connected' || state === 'completed') {
+        setCallState((prev) =>
+          prev && prev.mode !== 'connected'
+            ? { ...prev, mode: 'connected', startedAt: Date.now() }
+            : prev,
+        );
+      } else if (state === 'failed') {
+        // Media will never flow on this pair — don't leave a silent "connected".
+        void endCallRef.current('failed');
+      }
+    };
+    (pc as any).oniceconnectionstatechange = onIceState;
     (pc as any).onconnectionstatechange = () => {
-      const state = (pc as any).connectionState;
-      console.log('[call] PC state:', state);
+      console.log('[call] PC state:', (pc as any).connectionState);
     };
 
     return pc;
@@ -219,6 +245,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       localStreamRef.current.getTracks().forEach((t: any) => t.stop());
       localStreamRef.current = null;
     }
+    remoteStreamRef.current = null;
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
@@ -651,6 +678,11 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     }).catch(() => {});
     await cleanupCall();
   }, [callState, sendSignal, cleanupCall]);
+
+  // Keep the ICE-failure escape hatch pointed at the current endCall.
+  useEffect(() => {
+    endCallRef.current = endCall;
+  }, [endCall]);
 
   // ── Expand incoming banner to fullscreen ────────────────────────────────────
 

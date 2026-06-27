@@ -161,7 +161,10 @@ export const ChatScreen = () => {
         />
       </SafeAreaView>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <MessageList
           messages={messages}
           senderId={senderId}
