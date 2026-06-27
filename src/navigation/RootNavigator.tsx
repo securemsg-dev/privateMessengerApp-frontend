@@ -22,13 +22,29 @@ import * as Notifications from 'expo-notifications';
 
 // Show notifications when app is foregrounded (banner + sound).
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
+  handleNotification: async (notification) => {
+    // A foregrounded app already has a live user-WS, so an incoming call
+    // arrives over WS and the in-app CallProvider banner rings it. Suppress
+    // the redundant system banner for that case — the push only exists to
+    // wake a backgrounded/closed app, where this handler doesn't run anyway.
+    const data = notification.request.content.data as Record<string, unknown>;
+    if (data?.type === 'incoming_call') {
+      return {
+        shouldShowAlert: false,
+        shouldShowBanner: false,
+        shouldShowList: false,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      };
+    }
+    return {
+      shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    };
+  },
 });
 
 export const RootNavigator = () => {
