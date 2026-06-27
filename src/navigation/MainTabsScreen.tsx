@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSelector } from 'react-redux';
 import { useTheme } from '../theme/ThemeContext';
+import { selectTotalUnread } from '../store/slices/chatSlice';
 import { ChatListScreen } from '../screens/Main/ChatListScreen';
 import { CallsScreen } from '../screens/Main/CallsScreen';
 import { ContactListScreen } from '../screens/Main/ContactListScreen';
@@ -26,6 +28,7 @@ const TABS: Tab[] = [
 export const MainTabsScreen = () => {
   const { colors } = useTheme();
   const [activeTab, setActiveTab] = useState<TabKey>('Chats');
+  const totalUnread = useSelector(selectTotalUnread);
 
   const renderScreen = () => {
     switch (activeTab) {
@@ -52,6 +55,7 @@ export const MainTabsScreen = () => {
       >
         {TABS.map((tab) => {
           const isActive = activeTab === tab.key;
+          const badge = tab.key === 'Chats' ? totalUnread : 0;
           return (
             <TouchableOpacity
               key={tab.key}
@@ -59,11 +63,20 @@ export const MainTabsScreen = () => {
               onPress={() => setActiveTab(tab.key)}
               activeOpacity={0.7}
             >
-              <Ionicons
-                name={(isActive ? tab.activeIcon : tab.icon) as any}
-                size={24}
-                color={isActive ? colors.primary : colors.textSecondary}
-              />
+              <View>
+                <Ionicons
+                  name={(isActive ? tab.activeIcon : tab.icon) as any}
+                  size={24}
+                  color={isActive ? colors.primary : colors.textSecondary}
+                />
+                {badge > 0 && (
+                  <View style={[styles.badge, { backgroundColor: colors.danger, borderColor: colors.surface }]}>
+                    <Text style={styles.badgeText} numberOfLines={1}>
+                      {badge > 99 ? '99+' : badge}
+                    </Text>
+                  </View>
+                )}
+              </View>
               <Text
                 style={[
                   styles.tabLabel,
@@ -95,5 +108,22 @@ const styles = StyleSheet.create({
   tabLabel: {
     fontSize: 11,
     fontWeight: '500',
+  },
+  badge: {
+    position: 'absolute',
+    top: -5,
+    right: -10,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
   },
 });

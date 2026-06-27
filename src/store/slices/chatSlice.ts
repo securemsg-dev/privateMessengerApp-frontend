@@ -647,4 +647,18 @@ export const {
   markMessageDeletedForEveryone,
   hydrateMessageMedia,
 } = chatSlice.actions;
+
+/**
+ * Total unread across all conversations, for the Chats tab badge. Muted
+ * conversations don't contribute (their messages are silenced), matching how
+ * the chat list de-emphasises them.
+ */
+export const selectTotalUnread = (state: {
+  chat: { conversations: Conversation[] };
+}): number =>
+  state.chat.conversations.reduce((sum, c) => {
+    const muted = c.muteUntil ? new Date(c.muteUntil).getTime() > Date.now() : false;
+    return muted ? sum : sum + (c.unreadCount || 0);
+  }, 0);
+
 export default chatSlice.reducer;
