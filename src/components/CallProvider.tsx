@@ -39,6 +39,34 @@ const RING_TIMEOUT_MS = 30_000;
 // still catches it — the WS publish itself is fire-and-forget.
 const OFFER_RESEND_MS = 3_000;
 
+// The ICE/TURN config is identical for every user and its TURN credentials are
+// static env vars, so re-fetching it on every call setup just adds a network
+// round-trip to the dial latency. Cache it briefly and pre-warm on connect.
+const ICE_CACHE_TTL_MS = 5 * 60_000;
+let iceServersCache: { servers: any[]; at: number } | null = null;
+
+const fetchIceServers = async (force = false): Promise<any[]> => {
+  if (
+    !force &&
+    iceServersCache &&
+    Date.now() - iceServersCache.at < ICE_CACHE_TTL_MS
+  ) {
+    return iceServersCache.servers;
+  }
+  const { ice_servers } = await getWebRtcConfigApi();
+  // Native RTCPeerConnection (Android) throws "username == null" if an entry
+  // carries username/credential keys with null values — only pass keys that
+  // actually have a value.
+  const servers = ice_servers.map((s: any) => {
+    const entry: Record<string, unknown> = { urls: s.urls };
+    if (s.username) entry.username = s.username;
+    if (s.credential) entry.credential = s.credential;
+    return entry;
+  });
+  iceServersCache = { servers, at: Date.now() };
+  return servers;
+};
+
 // ─── Public types ──────────────────────────────────────────────────────────────
 
 export type CallMode =
@@ -190,17 +218,9 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
 
   // ── Peer connection factory ─────────────────────────────────────────────────
 
-  const createPeerConnection = useCallback(async () => {
-    const { ice_servers } = await getWebRtcConfigApi();
-    // Native RTCPeerConnection (Android) throws "username == null" if an
-    // entry carries username/credential keys with null values — only pass
-    // the keys that actually have a value.
-    const iceServers = ice_servers.map((s: any) => {
-      const entry: Record<string, unknown> = { urls: s.urls };
-      if (s.username) entry.username = s.username;
-      if (s.credential) entry.credential = s.credential;
-      return entry;
-    });
+  // Takes the (already-fetched, cached) ICE servers so the network round-trip
+  // can be parallelised with mic capture / callee lookup by the caller.
+  const createPeerConnection = useCallback((iceServers: any[]) => {
     const pc = new RTCPeerConnection({ iceServers } as any);
 
     // Retain the remote stream so its audio track stays alive for playback.
@@ -269,7 +289,12 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     const ws = new WebSocket(url);
     userWsRef.current = ws;
 
-    ws.onopen = () => console.log('[call] User WS connected');
+    ws.onopen = () => {
+      console.log('[call] User WS connected');
+      // Pre-warm the ICE/TURN config so the first call doesn't pay for the
+      // fetch on the critical path. Failure is non-fatal (call setup refetches).
+      void fetchIceServers().catch(() => {});
+    };
 
     ws.onmessage = (event) => {
       let data: any;
@@ -434,8 +459,21 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
-      // 2. Resolve the callee's UUID from their private number
-      const lookupResult = await lookupContactApi(contact.number);
+      // 2. Independent setup runs concurrently — the callee lookup, mic
+      //    capture, and ICE config don't depend on each other, so overlapping
+      //    them (instead of three serial round-trips) cuts the time before the
+      //    callee's phone rings. setCallAudioMode is a fast local call.
+      await setCallAudioMode(true, false);
+
+      const [lookupResult, stream, iceServers] = await Promise.all([
+        lookupContactApi(contact.number),
+        mediaDevices.getUserMedia({ audio: true, video: false }),
+        fetchIceServers(),
+      ]);
+      // Track the stream immediately so cleanupCall always releases the mic,
+      // even if we bail on the not-found path below.
+      localStreamRef.current = stream;
+
       if (!lookupResult.found || !lookupResult.user) {
         Alert.alert('Call failed', 'This user is no longer on PrivaChat.');
         await cleanupCall();
@@ -444,17 +482,10 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       const calleeId = lookupResult.user.id;
       setCallState((prev) => (prev ? { ...prev, peerUserId: calleeId } : prev));
 
-      // 3. Local media + peer connection — do this BEFORE creating the
-      //    server call row, so a failed setup never writes history.
-      await setCallAudioMode(true, false);
-
-      const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
-      localStreamRef.current = stream;
-
-      const pc = await createPeerConnection();
+      const pc = createPeerConnection(iceServers);
       pcRef.current = pc;
 
-      // 4. Log the call in the backend now that setup can't silently fail
+      // 3. Log the call in the backend now that setup can't silently fail
       const callRecord = await createCallApi({
         conversation_id: contact.conversationId,
         callee_id: calleeId,
@@ -563,10 +594,14 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
 
       await setCallAudioMode(true, false);
 
-      const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
+      // Capture mic + fetch (cached) ICE config concurrently to answer faster.
+      const [stream, iceServers] = await Promise.all([
+        mediaDevices.getUserMedia({ audio: true, video: false }),
+        fetchIceServers(),
+      ]);
       localStreamRef.current = stream;
 
-      const pc = await createPeerConnection();
+      const pc = createPeerConnection(iceServers);
       pcRef.current = pc;
 
       (pc as any).onicecandidate = (event: any) => {
