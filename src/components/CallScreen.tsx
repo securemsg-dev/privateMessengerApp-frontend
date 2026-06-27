@@ -163,6 +163,7 @@ export const CallScreen = ({
 
   const isIncoming = mode === 'incoming-fullscreen';
   const isOutgoing = mode === 'outgoing';
+  const isConnecting = mode === 'connecting';
   const isConnected = mode === 'connected';
 
   const statusLabel = isIncoming
@@ -182,7 +183,7 @@ export const CallScreen = ({
           {/* Avatar block */}
           <View style={styles.avatarBlock}>
             <View style={styles.avatarRingHost}>
-              {(isOutgoing || isIncoming) && (
+              {(isOutgoing || isIncoming || isConnecting) && (
                 <PulsingRings color="rgba(255,255,255,0.55)" />
               )}
               <View style={styles.avatar}>
@@ -201,6 +202,8 @@ export const CallScreen = ({
                   CONNECTED  ·  {formatDuration(seconds)}
                 </Text>
               </View>
+            ) : isConnecting ? (
+              <Text style={styles.subline}>Connecting…</Text>
             ) : (
               <Text style={styles.subline}>
                 {formatPrivateNumber(contactNumber) || 'Calling…'}
@@ -287,11 +290,11 @@ export const CallScreen = ({
                     style={{ transform: [{ rotate: '135deg' }] }}
                   />
                 </Pressable>
-                <Text style={styles.bigBtnLabel}>
-                  {isOutgoing ? 'End call' : 'End call'}
-                </Text>
-                {isOutgoing && (
-                  <Text style={styles.dialingText}>Calling…</Text>
+                <Text style={styles.bigBtnLabel}>End call</Text>
+                {(isOutgoing || isConnecting) && (
+                  <Text style={styles.dialingText}>
+                    {isConnecting ? 'Connecting…' : 'Calling…'}
+                  </Text>
                 )}
               </View>
             )}

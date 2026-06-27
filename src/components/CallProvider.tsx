@@ -30,6 +30,7 @@ import {
 } from '../services/api';
 import * as SecureStore from '../utils/secureStorage';
 import { userSocketBus } from '../services/userSocketBus';
+import { useCallSounds } from '../hooks/useCallSounds';
 
 // How long an unanswered call rings before it auto-cancels (caller) / is
 // marked missed (callee). Matches the standard ~30s phone-app behaviour.
@@ -73,6 +74,8 @@ export type CallMode =
   | 'incoming-banner'
   | 'incoming-fullscreen'
   | 'outgoing'
+  // SDP exchanged, waiting for ICE/media to actually establish.
+  | 'connecting'
   | 'connected';
 
 export interface CallState {
@@ -132,6 +135,9 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   const [callState, setCallState] = useState<CallState | null>(null);
   const [muted, setMuted] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(false);
+
+  // Ringback (outgoing) / ringtone (incoming) — stops once connecting/ended.
+  useCallSounds(callState?.mode ?? null);
 
   // Non-state refs (avoid unnecessary re-renders)
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -361,8 +367,10 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
               pcRef.current?.addIceCandidate(c).catch(() => {});
             }
             pendingIceRef.current = [];
+            // SDP is exchanged — but audio doesn't flow until ICE connects.
+            // Show "Connecting…" until oniceconnectionstatechange promotes us.
             setCallState((prev) =>
-              prev ? { ...prev, mode: 'connected', startedAt: Date.now() } : prev,
+              prev ? { ...prev, mode: 'connecting' } : prev,
             );
           }).catch((err: any) => console.warn('[call] setRemoteDescription (answer):', err));
         }
@@ -640,8 +648,9 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         sdp: answer.sdp,
       });
 
+      // Answer sent — wait for ICE to actually connect before "Connected".
       setCallState((prev) =>
-        prev ? { ...prev, mode: 'connected', startedAt: Date.now() } : prev,
+        prev ? { ...prev, mode: 'connecting' } : prev,
       );
     } catch (err) {
       console.warn('[call] acceptCall failed:', err);
