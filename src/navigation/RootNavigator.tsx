@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { RootState, AppDispatch } from '../store';
 import { lockApp, rehydrateThunk } from '../store/slices/authSlice';
+import { isAppLockSuppressed } from '../utils/appLockGuard';
 import { AuthStack } from './AuthStack';
 import { MainStack } from './MainStack';
 import { AppLockScreen } from '../screens/Auth/AppLockScreen';
@@ -169,7 +170,15 @@ export const RootNavigator = () => {
   useEffect(() => {
     let prev: AppStateStatus = AppState.currentState;
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
-      if (prev !== 'active' && next === 'active' && isAuthenticatedRef.current) {
+      // Don't re-lock when the brief background was caused by an intentional
+      // in-app system UI (photo picker, permission dialog, active call) — see
+      // appLockGuard. Only a genuine "user left the app" should force the PIN.
+      if (
+        prev !== 'active' &&
+        next === 'active' &&
+        isAuthenticatedRef.current &&
+        !isAppLockSuppressed()
+      ) {
         dispatch(lockApp());
       }
       prev = next;

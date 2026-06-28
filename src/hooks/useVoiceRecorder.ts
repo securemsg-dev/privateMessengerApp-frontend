@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, PanResponder } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Audio } from 'expo-av';
+import { withoutAppLock } from '../utils/appLockGuard';
 
 type RecMode = 'idle' | 'recording' | 'preview';
 type SendMediaAsset = (uri: string, mime: string, type: 'image' | 'video' | 'voice') => Promise<void>;
@@ -42,7 +43,7 @@ export function useVoiceRecorder(
     closeTray();
     if (recModeRef.current !== 'idle') return;
     try {
-      const { status } = await Audio.requestPermissionsAsync();
+      const { status } = await withoutAppLock(() => Audio.requestPermissionsAsync());
       if (status !== 'granted') {
         Alert.alert('Permission needed', 'Please allow microphone access in Settings.');
         return;

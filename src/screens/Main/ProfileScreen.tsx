@@ -22,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { logoutThunk, setProfilePictureKey } from '../../store/slices/authSlice';
+import { withoutAppLock } from '../../utils/appLockGuard';
 import { RootState, AppDispatch } from '../../store';
 import { useTheme } from '../../theme/ThemeContext';
 import { BottomSheet } from '../../components/BottomSheet';
@@ -100,20 +101,22 @@ export const ProfileScreen = () => {
   const handlePickAvatar = async () => {
     setUploadError(null);
 
-    // Request permission
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow access to your photo library in Settings.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
+    // Request permission + pick with the app lock suppressed, so the brief
+    // background while the system picker is open doesn't force a PIN re-entry.
+    const result = await withoutAppLock(async () => {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow access to your photo library in Settings.');
+        return null;
+      }
+      return ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
     });
-    if (result.canceled || !result.assets.length) return;
+    if (!result || result.canceled || !result.assets.length) return;
 
     const asset = result.assets[0];
     setUploading(true);

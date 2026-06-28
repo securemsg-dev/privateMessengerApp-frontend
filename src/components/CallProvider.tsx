@@ -31,6 +31,7 @@ import {
 import * as SecureStore from '../utils/secureStorage';
 import { userSocketBus } from '../services/userSocketBus';
 import { useCallSounds } from '../hooks/useCallSounds';
+import { beginLockSuppression, endLockSuppression } from '../utils/appLockGuard';
 
 // How long an unanswered call rings before it auto-cancels (caller) / is
 // marked missed (callee). Matches the standard ~30s phone-app behaviour.
@@ -138,6 +139,16 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
 
   // Ringback (outgoing) / ringtone (incoming) — stops once connecting/ended.
   useCallSounds(callState?.mode ?? null);
+
+  // While a call is up, don't let the brief backgrounding from the incoming
+  // permission dialog / audio routing / returning to the call force a PIN
+  // re-entry. Suppression lifts when the call ends.
+  const inCall = callState != null;
+  useEffect(() => {
+    if (!inCall) return;
+    beginLockSuppression();
+    return () => endLockSuppression();
+  }, [inCall]);
 
   // Non-state refs (avoid unnecessary re-renders)
   const pcRef = useRef<RTCPeerConnection | null>(null);
