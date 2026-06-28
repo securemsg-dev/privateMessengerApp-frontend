@@ -20,6 +20,8 @@ export interface Conversation {
   id: string;
   contactName: string;
   contactPrivateNumber: string;
+  /** Peer's profile_picture_key (media blob id); null when they have no avatar. */
+  contactProfilePictureKey: string | null;
   /** Peer's Curve25519 public key (Base64). Null until they upload one. */
   contactPublicKey: string | null;
   lastMessage: string;
@@ -132,6 +134,7 @@ export const loadConversationsThunk = createAsyncThunk<Conversation[]>(
         id: r.conversation_id,
         contactName: '',
         contactPrivateNumber: '',
+        contactProfilePictureKey: null,
         contactPublicKey: null,
         lastMessage: r.last_message,
         lastMessageTime: r.last_time,
@@ -169,6 +172,7 @@ export const loadConversationsThunk = createAsyncThunk<Conversation[]>(
               other?.display_name ||
               (other?.private_number ? formatNum(other.private_number) : ''),
             contactPrivateNumber: other?.private_number || '',
+            contactProfilePictureKey: other?.profile_picture_key ?? null,
             contactPublicKey: peerKey,
             lastMessage: preview,
             lastMessageTime: lastMsg?.created_at || c.created_at,

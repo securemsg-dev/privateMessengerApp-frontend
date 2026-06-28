@@ -39,6 +39,8 @@ interface AuthState {
   privateNumber: string | null;
   userId: string | null;
   displayName: string | null;
+  /** Current user's profile_picture_key (blob id); null when none set. */
+  profilePictureKey: string | null;
   status: 'idle' | 'loading' | 'error';
   error: string | null;
   /** Holds registration result until user taps "Go to App" on PrivateNumberRevealScreen. */
@@ -53,6 +55,7 @@ const initialState: AuthState = {
   privateNumber: null,
   userId: null,
   displayName: null,
+  profilePictureKey: null,
   status: 'idle',
   error: null,
   pendingRegistration: null,
@@ -322,6 +325,11 @@ const authSlice = createSlice({
     unlockApp: (state) => {
       state.appLocked = false;
     },
+    // Set after a profile-picture upload (or when /users/me is refreshed) so
+    // the user's own avatar updates everywhere immediately.
+    setProfilePictureKey: (state, action: PayloadAction<string | null>) => {
+      state.profilePictureKey = action.payload;
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -400,5 +408,6 @@ export const {
   forceLogout,
   lockApp,
   unlockApp,
+  setProfilePictureKey,
 } = authSlice.actions;
 export default authSlice.reducer;

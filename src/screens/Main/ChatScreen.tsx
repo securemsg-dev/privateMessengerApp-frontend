@@ -74,6 +74,11 @@ export const ChatScreen = () => {
   const privateNumber = useSelector((s: RootState) => s.auth.privateNumber);
   const displayName = useSelector((s: RootState) => s.auth.displayName);
   const messages = useSelector((s: RootState) => s.chat.activeMessages);
+  // Peer avatar comes from the cached conversation (no need to thread through
+  // navigation params); falls back to initials when the chat isn't listed yet.
+  const conv = useSelector((s: RootState) =>
+    s.chat.conversations.find((c) => c.id === conversationId),
+  );
 
   const senderId = userId || privateNumber || 'local';
   const firstName = (contactName || '').split(' ')[0] || 'there';
@@ -152,6 +157,7 @@ export const ChatScreen = () => {
         <ChatHeader
           contactName={contactName}
           contactPrivateNumber={contactPrivateNumber}
+          contactProfilePictureKey={conv?.contactProfilePictureKey}
           isSelfChat={isSelfChat}
           displayName={displayName}
           colors={colors}

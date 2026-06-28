@@ -2,6 +2,7 @@ import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { styles } from './styles';
+import { Avatar } from '../../../components/Avatar';
 
 interface Colors {
   text: string;
@@ -14,6 +15,7 @@ interface Colors {
 interface Props {
   contactName: string;
   contactPrivateNumber: string;
+  contactProfilePictureKey?: string | null;
   isSelfChat: boolean | undefined;
   displayName: string | null;
   colors: Colors;
@@ -21,15 +23,6 @@ interface Props {
   onCall: () => void;
   onCallLongPress: () => void;
 }
-
-const getInitials = (name: string) =>
-  name
-    .split(' ')
-    .filter(Boolean)
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
 
 const formatPrivateNumber = (n: string) => {
   if (!n || n.length !== 10) return '';
@@ -39,6 +32,7 @@ const formatPrivateNumber = (n: string) => {
 export const ChatHeader = ({
   contactName,
   contactPrivateNumber,
+  contactProfilePictureKey,
   isSelfChat,
   displayName,
   colors,
@@ -51,16 +45,11 @@ export const ChatHeader = ({
       <Ionicons name="chevron-back" size={26} color={colors.text} />
     </TouchableOpacity>
 
-    <View
-      style={[
-        styles.headerAvatar,
-        { backgroundColor: colors.surface, borderColor: colors.border },
-      ]}
-    >
-      <Text style={[styles.headerAvatarText, { color: colors.textSecondary }]}>
-        {isSelfChat ? getInitials(displayName || 'ME') : getInitials(contactName)}
-      </Text>
-    </View>
+    <Avatar
+      profilePictureKey={isSelfChat ? null : contactProfilePictureKey}
+      name={isSelfChat ? displayName || 'ME' : contactName}
+      size={36}
+    />
 
     <View style={styles.headerInfo}>
       <Text style={[styles.headerName, { color: colors.text }]} numberOfLines={1}>

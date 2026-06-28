@@ -20,6 +20,7 @@ import { BottomSheet } from '../../components/BottomSheet';
 import { DropdownMenu } from '../../components/DropdownMenu';
 import { SwipeableChatRow } from '../../components/SwipeableChatRow';
 import { UndoToast } from '../../components/UndoToast';
+import { Avatar } from '../../components/Avatar';
 import { RootState, AppDispatch } from '../../store';
 import { getItemAsync, setItemAsync } from '../../utils/secureStorage';
 import {
@@ -485,16 +486,11 @@ export const ChatListScreen = () => {
           />
         )}
 
-        <View
-          style={[
-            styles.avatar,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <Text style={[styles.avatarText, { color: colors.textSecondary }]}>
-            {getInitials(item.contactName || '#')}
-          </Text>
-        </View>
+        <Avatar
+          profilePictureKey={item.contactProfilePictureKey}
+          name={item.contactName || '#'}
+          size={46}
+        />
 
         <View style={styles.rowMain}>
           <View style={styles.rowTitleLine}>

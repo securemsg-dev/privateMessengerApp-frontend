@@ -18,6 +18,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useSelector } from 'react-redux';
 import { RootState } from '../../store';
 import { useTheme } from '../../theme/ThemeContext';
+import { Avatar } from '../../components/Avatar';
 
 const ON_PRIMARY = '#ffffff';
 
@@ -111,6 +112,7 @@ export const SettingsScreen = () => {
   const navigation = useNavigation<any>();
   const rawNum = useSelector((s: RootState) => s.auth.privateNumber);
   const displayName = useSelector((s: RootState) => s.auth.displayName) ?? 'You';
+  const profilePictureKey = useSelector((s: RootState) => s.auth.profilePictureKey);
 
   const handleCopy = () => {
     if (!rawNum) return;
@@ -166,9 +168,12 @@ export const SettingsScreen = () => {
           ]}
         >
           <View style={styles.identityHeader}>
-            <View style={styles.identityAvatar}>
-              <Text style={styles.identityAvatarText}>{getInitials(displayName)}</Text>
-            </View>
+            <Avatar
+              profilePictureKey={profilePictureKey}
+              name={displayName}
+              size={48}
+              style={styles.identityAvatar}
+            />
             <View style={{ flex: 1 }}>
               <Text style={styles.identityName} numberOfLines={1}>
                 {displayName}

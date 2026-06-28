@@ -34,6 +34,7 @@ import naclUtil from 'tweetnacl-util';
 import * as SecureStore from '../utils/secureStorage';
 import {
   TOKEN_KEY,
+  buildAvatarUrl,
   requestMediaUploadApi,
 } from './api';
 import {
@@ -143,6 +144,41 @@ export async function uploadEncryptedMedia(
       sizeBytes: plain.length, // pre-encryption size for progress UI
     },
   };
+}
+
+// ── Avatars ──────────────────────────────────────────────────────────────────
+
+// Profile pictures are UNENCRYPTED image blobs (so anyone can view them), but
+// the /media endpoint serves bytes as application/octet-stream, which <Image>
+// can't reliably decode straight from a URL. So we download to a cached file
+// and render that file:// URI instead. Keyed by blobId → a new upload (new
+// blob) naturally busts the cache. Deduped so many avatars don't re-download.
+const avatarInFlight = new Map<string, Promise<string>>();
+
+export async function downloadAvatar(blobId: string): Promise<string> {
+  const inFlight = avatarInFlight.get(blobId);
+  if (inFlight) return inFlight;
+
+  const promise = (async () => {
+    const dir = await ensureCacheDir();
+    const target = `${dir}avatar_${blobId}.jpg`;
+    const info = await FileSystem.getInfoAsync(target);
+    if (info.exists && info.size && info.size > 0) return target;
+
+    const token = await SecureStore.getItemAsync(TOKEN_KEY);
+    const dl = await FileSystem.downloadAsync(buildAvatarUrl(blobId), target, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (dl.status !== 200) {
+      await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
+      throw new Error(`Avatar download failed (${dl.status})`);
+    }
+    return target;
+  })();
+
+  avatarInFlight.set(blobId, promise);
+  promise.finally(() => avatarInFlight.delete(blobId));
+  return promise;
 }
 
 // ── Download ─────────────────────────────────────────────────────────────────

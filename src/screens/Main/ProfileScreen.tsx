@@ -21,7 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 // used here (cacheDirectory / getInfoAsync with size) live under the legacy entry.
 import * as FileSystem from 'expo-file-system/legacy';
 
-import { logoutThunk } from '../../store/slices/authSlice';
+import { logoutThunk, setProfilePictureKey } from '../../store/slices/authSlice';
 import { RootState, AppDispatch } from '../../store';
 import { useTheme } from '../../theme/ThemeContext';
 import { BottomSheet } from '../../components/BottomSheet';
@@ -66,9 +66,11 @@ export const ProfileScreen = () => {
         if (me.profile_picture_key) {
           setAvatarBlobId(me.profile_picture_key);
         }
+        // Mirror into the store so the avatar shows on the Settings card too.
+        dispatch(setProfilePictureKey(me.profile_picture_key ?? null));
       })
       .catch(() => { /* non-critical — profile still renders without avatar */ });
-  }, []);
+  }, [dispatch]);
 
   // Whenever avatarBlobId changes, ensure the image is in local cache
   const loadAvatar = useCallback(async (blobId: string) => {
@@ -142,6 +144,7 @@ export const ProfileScreen = () => {
 
       setAvatarBlobId(reservation.blob_id);
       setAvatarUri(localPath);
+      dispatch(setProfilePictureKey(reservation.blob_id));
     } catch (err: any) {
       const msg = err?.detail || err?.message || 'Upload failed. Please try again.';
       setUploadError(msg);
