@@ -15,6 +15,7 @@ module.exports = {
     '^expo-sqlite$': '<rootDir>/jest/mocks/expo-sqlite.js',
     '^expo-constants$': '<rootDir>/jest/mocks/expo-constants.js',
     '^expo-file-system$': '<rootDir>/jest/mocks/expo-file-system.js',
+    '^expo-file-system/legacy$': '<rootDir>/jest/mocks/expo-file-system.js',
   },
   transform: {
     '^.+\\.tsx?$': [

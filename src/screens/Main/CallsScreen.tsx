@@ -17,6 +17,7 @@ import { useSelector } from 'react-redux';
 import { useTheme } from '../../theme/ThemeContext';
 import { CallDTO, listCallsApi } from '../../services/api';
 import { getContacts } from '../../services/database';
+import { cacheGet, cacheSet, CACHE_KEYS } from '../../services/cache';
 import { RootState } from '../../store';
 
 type CallDirection = 'incoming' | 'outgoing';
@@ -137,6 +138,7 @@ export const CallsScreen = () => {
         };
       });
       setCalls(display);
+      void cacheSet(CACHE_KEYS.callLog, display);
     } catch {
       // silently fall through — empty state handles no-calls UI
     } finally {
@@ -144,6 +146,19 @@ export const CallsScreen = () => {
       setRefreshing(false);
     }
   }, [myUserId]);
+
+  // Paint the cached call log instantly on open, then refresh from the network.
+  useEffect(() => {
+    let active = true;
+    cacheGet<DisplayCall[]>(CACHE_KEYS.callLog).then((cached) => {
+      if (!active || !cached) return;
+      setCalls((prev) => (prev.length ? prev : cached));
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     void load();

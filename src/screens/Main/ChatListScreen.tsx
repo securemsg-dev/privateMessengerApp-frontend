@@ -25,6 +25,7 @@ import { RootState, AppDispatch } from '../../store';
 import { getItemAsync, setItemAsync } from '../../utils/secureStorage';
 import {
   loadConversationsThunk,
+  hydrateConversationsThunk,
   deleteAllConversationsThunk,
   deleteSelectedConversationsThunk,
   mergeConversation,
@@ -99,6 +100,8 @@ export const ChatListScreen = () => {
     c.unreadCount > 0 || c.manualUnread;
 
   useEffect(() => {
+    // Paint the cached list instantly, then refresh from the network.
+    dispatch(hydrateConversationsThunk());
     dispatch(loadConversationsThunk());
   }, []);
 

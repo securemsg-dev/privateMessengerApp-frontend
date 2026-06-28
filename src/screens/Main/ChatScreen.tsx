@@ -15,6 +15,8 @@ import { useTheme } from '../../theme/ThemeContext';
 import { RootState, AppDispatch } from '../../store';
 import {
   loadMessagesThunk,
+  hydrateMessagesThunk,
+  clearActiveMessages,
   mergeConversation,
   setActiveConversation,
 } from '../../store/slices/chatSlice';
@@ -141,10 +143,17 @@ export const ChatScreen = () => {
   useEffect(() => {
     dispatch(setActiveConversation(conversationId));
     dispatch(mergeConversation({ id: conversationId, patch: { unreadCount: 0, manualUnread: false } }));
+    // Start this thread from a clean slate, then paint cached history instantly
+    // while loadMessagesThunk fetches + decrypts the fresh page in the
+    // background. (Self-chat is local SQLite — already fast, no cache needed.)
+    if (!isSelfChat) {
+      dispatch(clearActiveMessages());
+      dispatch(hydrateMessagesThunk(conversationId));
+    }
     return () => {
       dispatch(setActiveConversation(null));
     };
-  }, [conversationId, dispatch]);
+  }, [conversationId, dispatch, isSelfChat]);
 
   // Unload playback sound on unmount
   useEffect(() => {

@@ -25,6 +25,7 @@ import {
 } from '../../services/api';
 import { wipeLocalData } from '../../services/database';
 import { clearKeyPair } from '../../services/crypto';
+import { clearCache } from '../../services/cache';
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -187,6 +188,7 @@ export const confirmDeleteFromLoginThunk = createAsyncThunk<
   await clearTokens();
   await clearCachedPrivateNumber();
   await clearKeyPair();
+  await clearCache();
 });
 
 /**
@@ -227,6 +229,7 @@ export const unlockAppThunk = createAsyncThunk<
       await clearTokens();
       await clearCachedPrivateNumber();
       await clearKeyPair();
+      await clearCache();
       return { kind: 'deleted' };
     }
     await persistTokens(resp.tokens.access_token, resp.tokens.refresh_token);
@@ -255,6 +258,9 @@ export const logoutThunk = createAsyncThunk<void, void>('auth/logout', async (_,
     }
   }
   await clearTokens();
+  // Wipe the stale-while-revalidate cache so the next account never sees the
+  // previous user's decrypted conversations/messages.
+  await clearCache();
 });
 
 export const rehydrateThunk = createAsyncThunk<AuthResult | null, void>(

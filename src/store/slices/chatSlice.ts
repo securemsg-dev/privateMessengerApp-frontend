@@ -11,6 +11,7 @@ import {
   MediaEnvelope,
   parseMediaEnvelope,
 } from '../../services/crypto';
+import { cacheGet, cacheSet, CACHE_KEYS } from '../../services/cache';
 
 /* ── Types ─────────────────────────────────────────────── */
 
@@ -185,12 +186,25 @@ export const loadConversationsThunk = createAsyncThunk<Conversation[]>(
           };
         }),
       );
+      // Cache the freshly-loaded list for instant render next launch. Only on
+      // success — a network failure leaves serverConvs empty and must not
+      // clobber a good cache.
+      void cacheSet(CACHE_KEYS.conversations, [...selfConvs, ...serverConvs]);
     } catch (err) {
       console.warn('[chat] Failed to load server conversations:', err);
     }
 
     return [...selfConvs, ...serverConvs];
   },
+);
+
+/**
+ * Stale-while-revalidate: return the cached conversation list (if any) so the
+ * chat list paints instantly while loadConversationsThunk refreshes it.
+ */
+export const hydrateConversationsThunk = createAsyncThunk<Conversation[] | null>(
+  'chat/hydrateConversations',
+  async () => cacheGet<Conversation[]>(CACHE_KEYS.conversations),
 );
 
 /**
@@ -249,7 +263,7 @@ export const loadMessagesThunk = createAsyncThunk<
     // (peerPubKey, mySecretKey) decrypts both directions).
     const page = await listMessagesApi(conversationId);
     const ordered = page.messages.slice().reverse();
-    return Promise.all(
+    const decrypted = await Promise.all(
       ordered.map<Promise<Message>>(async (m) => {
         const decrypted = await decryptOrFallback(
           m.encrypted_payload, peerPublicKey,
@@ -302,8 +316,23 @@ export const loadMessagesThunk = createAsyncThunk<
         };
       }),
     );
+    // Cache decrypted history so re-opening this chat paints instantly.
+    void cacheSet(CACHE_KEYS.messages(conversationId), decrypted);
+    return decrypted;
   },
 );
+
+/**
+ * Stale-while-revalidate for a chat thread: returns cached decrypted messages
+ * (if any) so the thread paints instantly while loadMessagesThunk refreshes.
+ */
+export const hydrateMessagesThunk = createAsyncThunk<
+  { conversationId: string; messages: Message[] } | null,
+  string
+>('chat/hydrateMessages', async (conversationId) => {
+  const messages = await cacheGet<Message[]>(CACHE_KEYS.messages(conversationId));
+  return messages ? { conversationId, messages } : null;
+});
 
 /** Default text shown in a bubble while an encrypted media blob is being
  *  fetched + decrypted, and in chat-list previews for media messages. */
@@ -609,9 +638,27 @@ const chatSlice = createSlice({
         state.status = 'idle';
         state.conversations = action.payload;
       })
+      // Cached conversations — apply only while nothing is loaded yet, so a
+      // late-resolving cache read never clobbers a fresh network result.
+      .addCase(hydrateConversationsThunk.fulfilled, (state, action) => {
+        if (action.payload && state.conversations.length === 0) {
+          state.conversations = action.payload;
+        }
+      })
       // loadMessages
       .addCase(loadMessagesThunk.fulfilled, (state, action) => {
         state.activeMessages = action.payload;
+      })
+      // Cached messages — apply only if we're still on that conversation and
+      // the live fetch hasn't already filled the thread.
+      .addCase(hydrateMessagesThunk.fulfilled, (state, action) => {
+        if (
+          action.payload &&
+          action.payload.conversationId === state.activeConversationId &&
+          state.activeMessages.length === 0
+        ) {
+          state.activeMessages = action.payload.messages;
+        }
       })
       // sendMessage — upsert so a fast WS echo that already inserted the
       // message by client_temp_id doesn't produce a duplicate key.
