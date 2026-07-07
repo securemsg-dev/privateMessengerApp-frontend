@@ -13,10 +13,12 @@ import * as SecureStore from '../../utils/secureStorage';
 import {
   ApiError,
   CACHED_PRIVATE_NUMBER_KEY,
+  clearPushTokenApi,
   confirmDeleteApi,
   getMeApi,
   loginApi,
   logoutApi,
+  PUSH_TOKEN_KEY,
   refreshApi,
   registerApi,
   REFRESH_TOKEN_KEY,
@@ -250,6 +252,18 @@ export const unlockAppThunk = createAsyncThunk<
 export const logoutThunk = createAsyncThunk<void, void>('auth/logout', async (_, { getState }) => {
   const state = getState() as { auth: AuthState };
   const refreshToken = state.auth.refreshToken;
+  // Detach this phone's push token BEFORE the session dies — otherwise the
+  // signed-out phone keeps receiving this account's notifications (sender
+  // name + number). Best-effort: an offline logout still completes locally.
+  try {
+    const pushToken = await SecureStore.getItemAsync(PUSH_TOKEN_KEY);
+    if (pushToken) {
+      await clearPushTokenApi(pushToken);
+      await SecureStore.deleteItemAsync(PUSH_TOKEN_KEY);
+    }
+  } catch {
+    /* push-token cleanup is best-effort */
+  }
   if (refreshToken) {
     try {
       await logoutApi(refreshToken);

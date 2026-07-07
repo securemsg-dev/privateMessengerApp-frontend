@@ -17,7 +17,8 @@ import { MainStack } from './MainStack';
 import { AppLockScreen } from '../screens/Auth/AppLockScreen';
 import { useTheme } from '../theme/ThemeContext';
 import { ensureKeyPairFor, getPublicKey } from '../services/crypto';
-import { uploadPublicKeyApi, registerDeviceApi } from '../services/api';
+import { uploadPublicKeyApi, registerDeviceApi, PUSH_TOKEN_KEY } from '../services/api';
+import * as SecureStore from '../utils/secureStorage';
 import { useMessageNotifications } from '../hooks/useMessageNotifications';
 import * as Notifications from 'expo-notifications';
 
@@ -140,6 +141,9 @@ export const RootNavigator = () => {
           platform: Platform.OS === 'ios' ? 'ios' : 'android',
           push_token: tokenData.data,
         });
+        // Remember which token we registered so logout can tell the server
+        // to detach it (stops notifications reaching a signed-out phone).
+        await SecureStore.setItemAsync(PUSH_TOKEN_KEY, tokenData.data);
       } catch (err) {
         console.warn('[push] Failed to register push token:', err);
       }

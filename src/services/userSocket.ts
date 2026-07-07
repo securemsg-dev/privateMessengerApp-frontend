@@ -16,8 +16,7 @@
 import * as SecureStore from '../utils/secureStorage';
 import {
   buildUserWebSocketUrl,
-  refreshApi,
-  REFRESH_TOKEN_KEY,
+  refreshTokensSingleFlight,
   TOKEN_KEY,
 } from './api';
 
@@ -217,14 +216,10 @@ export class UserSocket {
 
   private async tryRefreshThenReconnect(): Promise<void> {
     try {
-      const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-      if (!refreshToken) {
-        this.scheduleReconnect();
-        return;
-      }
-      const tokens = await refreshApi(refreshToken);
-      await SecureStore.setItemAsync(TOKEN_KEY, tokens.access_token);
-      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refresh_token);
+      // Single-flight: shares one in-flight refresh with the HTTP layer and
+      // the chat socket — the backend rotates refresh tokens, so concurrent
+      // refreshes would invalidate each other.
+      await refreshTokensSingleFlight();
       void this.openSocket();
     } catch {
       this.scheduleReconnect();

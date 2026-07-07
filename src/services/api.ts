@@ -61,6 +61,12 @@ if (__DEV__) {
 export const TOKEN_KEY = 'userToken';
 export const REFRESH_TOKEN_KEY = 'refreshToken';
 /**
+ * SecureStore key for the Expo push token last registered with the backend.
+ * Persisted so the logout flow can tell the server to detach it (otherwise a
+ * signed-out phone keeps receiving this account's notifications).
+ */
+export const PUSH_TOKEN_KEY = 'expoPushToken';
+/**
  * SecureStore key for the last-used 10-digit private number. Cached so the
  * login screen can pre-fill it on subsequent launches. Kept across normal
  * sign-outs; cleared only after a successful delete-from-login flow.
@@ -114,6 +120,34 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   return data as T;
 }
 
+// ── Single-flight token refresh ─────────────────────────────────────────────
+// The backend ROTATES refresh tokens: the first /auth/refresh invalidates the
+// token every other concurrent caller is still holding. Without single-flight,
+// the burst of parallel 401s at access-token expiry (chat list + calls + me
+// all firing together) races itself and the losers force-log the user out.
+// All refresh paths (HTTP retries AND the two WebSocket reconnects) must go
+// through this one shared promise.
+
+let _refreshInFlight: Promise<TokenPair> | null = null;
+
+export async function refreshTokensSingleFlight(): Promise<TokenPair> {
+  if (!_refreshInFlight) {
+    _refreshInFlight = (async () => {
+      const storedRefresh = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+      if (!storedRefresh) {
+        throw new ApiError(401, 'No refresh token');
+      }
+      const tokens = await refreshApi(storedRefresh);
+      await SecureStore.setItemAsync(TOKEN_KEY, tokens.access_token);
+      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refresh_token);
+      return tokens;
+    })().finally(() => {
+      _refreshInFlight = null;
+    });
+  }
+  return _refreshInFlight;
+}
+
 /**
  * Wraps request() with a single 401 → token-refresh → retry cycle.
  * On second 401 (refresh itself failed), calls the registered forceLogout
@@ -125,16 +159,9 @@ async function requestWithRefresh<T>(path: string, opts: RequestOptions = {}): P
     return await request<T>(path, opts);
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
-      const storedRefresh = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-      if (!storedRefresh) {
-        _onUnauthorized?.();
-        throw err;
-      }
       try {
-        const tokens = await refreshApi(storedRefresh);
-        await SecureStore.setItemAsync(TOKEN_KEY, tokens.access_token);
-        await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refresh_token);
-        return request<T>(path, opts);
+        await refreshTokensSingleFlight();
+        return await request<T>(path, opts);
       } catch {
         _onUnauthorized?.();
         throw err;
@@ -572,6 +599,18 @@ export function registerDeviceApi(body: DeviceRegisterBody): Promise<{ id: strin
     method: 'POST',
     auth: true,
     body,
+  });
+}
+
+/**
+ * POST /devices/clear-push — detach a push token from the caller's devices.
+ * Call before logout so a signed-out phone stops receiving notifications.
+ */
+export function clearPushTokenApi(pushToken: string): Promise<void> {
+  return requestWithRefresh<void>('/devices/clear-push', {
+    method: 'POST',
+    auth: true,
+    body: { push_token: pushToken },
   });
 }
 

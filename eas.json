@@ -1,6 +1,15 @@
 {
   "cli": { "version": ">= 12.0.0" },
   "build": {
+    "ios-simulator": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://privatemessengerapp-backend-production.up.railway.app/api/v1"
+      }
+    },
     "preview": {
       "distribution": "internal",
       "android": {
