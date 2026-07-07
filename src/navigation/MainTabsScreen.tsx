@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
 import { useTheme } from '../theme/ThemeContext';
@@ -27,6 +28,7 @@ const TABS: Tab[] = [
 
 export const MainTabsScreen = () => {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>('Chats');
   const totalUnread = useSelector(selectTotalUnread);
 
@@ -43,13 +45,16 @@ export const MainTabsScreen = () => {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={{ flex: 1 }}>{renderScreen()}</View>
 
-      {/* Custom bottom tab bar */}
+      {/* Custom bottom tab bar. Reserve the bottom safe-area inset so the
+          Android system nav bar (edge-to-edge draws behind us) sits below the
+          tab row instead of overlapping the icons. */}
       <View
         style={[
           styles.tabBar,
           {
             backgroundColor: colors.surface,
             borderTopColor: colors.border,
+            paddingBottom: Math.max(insets.bottom, 8),
           },
         ]}
       >
@@ -97,8 +102,8 @@ const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 8,
     paddingTop: 8,
+    // paddingBottom is applied inline from the safe-area inset (see above).
   },
   tabItem: {
     flex: 1,

@@ -2,7 +2,6 @@ import React, { useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
-  Platform,
   TextInput,
   View,
 } from 'react-native';
@@ -176,9 +175,13 @@ export const ChatScreen = () => {
         />
       </SafeAreaView>
 
+      {/* `padding` on both platforms: with Android edge-to-edge the native
+          window no longer resizes for the keyboard, so we must lift the
+          composer in JS. KeyboardAvoidingView's padding math self-corrects if
+          the OS *does* resize, so this is safe cross-device. */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
       >
         <MessageList
           messages={messages}
