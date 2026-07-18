@@ -1,0 +1,18 @@
+# App Store Connect API key auth for EAS — replaces Apple ID + 2FA login.
+#
+# Copy to `.easenv.local` (gitignored) and fill in real values, then load with:
+#   set -a; source .easenv.local; set +a
+#
+# IMPORTANT: these are read by `eas submit` ONLY. `eas build` silently ignores
+# them and still requires an interactive Apple ID login to create signing
+# credentials — an ASC API key cannot bootstrap a distribution certificate.
+
+# Path to the .p8 private key. Keep the key outside the repo; never commit it.
+export EXPO_ASC_API_KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_REPLACE_WITH_KEY_ID.p8"
+
+# From App Store Connect -> Users and Access -> Integrations -> App Store Connect API
+export EXPO_ASC_KEY_ID="REPLACE_WITH_ASC_KEY_ID"
+export EXPO_ASC_ISSUER_ID="REPLACE_WITH_ASC_ISSUER_ID"
+
+# Apple Developer team ID (Membership details).
+export EXPO_APPLE_TEAM_ID="REPLACE_WITH_APPLE_TEAM_ID"
