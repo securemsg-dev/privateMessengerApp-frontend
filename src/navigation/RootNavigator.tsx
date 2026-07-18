@@ -6,7 +6,6 @@ import {
   AppState,
   AppStateStatus,
   BackHandler,
-  Platform,
   View,
 } from 'react-native';
 import { RootState, AppDispatch } from '../store';
@@ -17,8 +16,9 @@ import { MainStack } from './MainStack';
 import { AppLockScreen } from '../screens/Auth/AppLockScreen';
 import { useTheme } from '../theme/ThemeContext';
 import { ensureKeyPairFor, getPublicKey } from '../services/crypto';
-import { uploadPublicKeyApi, registerDeviceApi, PUSH_TOKEN_KEY } from '../services/api';
-import * as SecureStore from '../utils/secureStorage';
+import { uploadPublicKeyApi } from '../services/api';
+import { getNotificationsEnabledFlag, registerPushToken } from '../services/push';
+import { loadSettingsThunk } from '../store/slices/settingsSlice';
 import { useMessageNotifications } from '../hooks/useMessageNotifications';
 import * as Notifications from 'expo-notifications';
 
@@ -30,7 +30,9 @@ Notifications.setNotificationHandler({
     // the redundant system banner for that case — the push only exists to
     // wake a backgrounded/closed app, where this handler doesn't run anyway.
     const data = notification.request.content.data as Record<string, unknown>;
-    if (data?.type === 'incoming_call') {
+    // User turned notifications off in Settings — suppress everything.
+    // (Background pushes are already stopped server-side by the detached token.)
+    if (!getNotificationsEnabledFlag() || data?.type === 'incoming_call') {
       return {
         shouldShowAlert: false,
         shouldShowBanner: false,
@@ -53,6 +55,7 @@ export const RootNavigator = () => {
   const isAuthenticated = useSelector((state: RootState) => state.auth.isAuthenticated);
   const appLocked = useSelector((state: RootState) => state.auth.appLocked);
   const privateNumber = useSelector((state: RootState) => state.auth.privateNumber);
+  const notificationsEnabled = useSelector((state: RootState) => state.settings.notificationsEnabled);
   const [isInitializing, setIsInitializing] = useState(true);
   const { colors } = useTheme();
   const dispatch = useDispatch<AppDispatch>();
@@ -66,6 +69,7 @@ export const RootNavigator = () => {
   }, [isAuthenticated]);
 
   useEffect(() => {
+    dispatch(loadSettingsThunk());
     dispatch(rehydrateThunk()).finally(() => setIsInitializing(false));
   }, [dispatch]);
 
@@ -97,61 +101,12 @@ export const RootNavigator = () => {
   }, [isAuthenticated, appLocked, privateNumber]);
 
   // Register device push token once authenticated so the backend can deliver
-  // notifications when the app is backgrounded or closed.
+  // notifications when the app is backgrounded or closed. Skipped while the
+  // user has notifications toggled off; toggling back on re-runs this.
   useEffect(() => {
-    if (!isAuthenticated || appLocked) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        // Android needs an explicit high-importance channel or heads-up
-        // banners (and sound) won't show. Must exist before notifications
-        // arrive; the backend tags message pushes with channelId "messages".
-        if (Platform.OS === 'android') {
-          await Notifications.setNotificationChannelAsync('messages', {
-            name: 'Messages',
-            importance: Notifications.AndroidImportance.MAX,
-            sound: 'default',
-            vibrationPattern: [0, 250, 250, 250],
-            lockscreenVisibility:
-              Notifications.AndroidNotificationVisibility.PRIVATE,
-          });
-          await Notifications.setNotificationChannelAsync('calls', {
-            name: 'Calls',
-            importance: Notifications.AndroidImportance.MAX,
-            sound: 'default',
-            vibrationPattern: [0, 500, 500, 500],
-            lockscreenVisibility:
-              Notifications.AndroidNotificationVisibility.PUBLIC,
-          });
-        }
-
-        const { status: existing } = await Notifications.getPermissionsAsync();
-        let finalStatus = existing;
-        if (existing !== 'granted') {
-          const { status } = await Notifications.requestPermissionsAsync();
-          finalStatus = status;
-        }
-        if (finalStatus !== 'granted' || cancelled) return;
-
-        const tokenData = await Notifications.getExpoPushTokenAsync();
-        if (cancelled) return;
-
-        await registerDeviceApi({
-          device_name: Platform.OS === 'ios' ? 'iPhone' : 'Android Device',
-          platform: Platform.OS === 'ios' ? 'ios' : 'android',
-          push_token: tokenData.data,
-        });
-        // Remember which token we registered so logout can tell the server
-        // to detach it (stops notifications reaching a signed-out phone).
-        await SecureStore.setItemAsync(PUSH_TOKEN_KEY, tokenData.data);
-      } catch (err) {
-        console.warn('[push] Failed to register push token:', err);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isAuthenticated, appLocked]);
+    if (!isAuthenticated || appLocked || !notificationsEnabled) return;
+    registerPushToken();
+  }, [isAuthenticated, appLocked, notificationsEnabled]);
 
   // Navigate to the relevant chat when the user taps a push notification.
   useEffect(() => {

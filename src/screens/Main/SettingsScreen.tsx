@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Platform,
   Share,
+  Switch,
   Alert,
   // eslint-disable-next-line @typescript-eslint/no-deprecated
   Clipboard,
@@ -15,10 +16,22 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { useSelector } from 'react-redux';
-import { RootState } from '../../store';
+import { useSelector, useDispatch } from 'react-redux';
+import { useTranslation } from 'react-i18next';
+import { RootState, AppDispatch } from '../../store';
+import {
+  Language,
+  setLanguageThunk,
+  setNotificationsEnabledThunk,
+} from '../../store/slices/settingsSlice';
 import { useTheme } from '../../theme/ThemeContext';
 import { Avatar } from '../../components/Avatar';
+import { BottomSheet } from '../../components/BottomSheet';
+
+const LANGUAGES: { code: Language; label: string }[] = [
+  { code: 'en', label: 'English' },
+  { code: 'zh', label: '简体中文' },
+];
 
 const ON_PRIMARY = '#ffffff';
 
@@ -109,27 +122,39 @@ const SectionHeader = ({ label, colors }: { label: string; colors: Colors }) => 
 
 export const SettingsScreen = () => {
   const { colors, isDark } = useTheme();
+  const { t } = useTranslation();
   const navigation = useNavigation<any>();
+  const dispatch = useDispatch<AppDispatch>();
   const rawNum = useSelector((s: RootState) => s.auth.privateNumber);
-  const displayName = useSelector((s: RootState) => s.auth.displayName) ?? 'You';
+  const displayName = useSelector((s: RootState) => s.auth.displayName) ?? t('tabs.you');
   const profilePictureKey = useSelector((s: RootState) => s.auth.profilePictureKey);
+  const bio = useSelector((s: RootState) => s.auth.bio);
+  const notificationsEnabled = useSelector((s: RootState) => s.settings.notificationsEnabled);
+  const language = useSelector((s: RootState) => s.settings.language);
+
+  const [languageSheetVisible, setLanguageSheetVisible] = useState(false);
 
   const handleCopy = () => {
     if (!rawNum) return;
     // eslint-disable-next-line @typescript-eslint/no-deprecated
     Clipboard.setString(rawNum);
-    Alert.alert('Copied', 'Your private number is on the clipboard.');
+    Alert.alert(t('settings.copiedTitle'), t('settings.copiedBody'));
   };
 
   const handleShare = async () => {
     if (!rawNum) return;
     try {
       await Share.share({
-        message: `Message me privately on PrivaChat — my number is ${formatPrivateNumber(rawNum)}.`,
+        message: t('settings.shareMessage', { number: formatPrivateNumber(rawNum) }),
       });
     } catch {
       /* user cancelled */
     }
+  };
+
+  const handleSelectLanguage = (code: Language) => {
+    setLanguageSheetVisible(false);
+    if (code !== language) dispatch(setLanguageThunk(code));
   };
 
   return (
@@ -139,8 +164,8 @@ export const SettingsScreen = () => {
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.background }}>
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.kicker, { color: colors.textSecondary }]}>SIGNED IN</Text>
-            <Text style={[styles.title, { color: colors.text }]}>You</Text>
+            <Text style={[styles.kicker, { color: colors.textSecondary }]}>{t('settings.signedIn')}</Text>
+            <Text style={[styles.title, { color: colors.text }]}>{t('settings.title')}</Text>
           </View>
           <TouchableOpacity style={styles.headerIcon} activeOpacity={0.7}>
             <Ionicons name="qr-code-outline" size={22} color={colors.text} />
@@ -178,11 +203,13 @@ export const SettingsScreen = () => {
               <Text style={styles.identityName} numberOfLines={1}>
                 {displayName}
               </Text>
-              <Text style={styles.identityBio}>No bio yet — tap to add</Text>
+              <Text style={styles.identityBio} numberOfLines={1}>
+                {bio || t('settings.noBioYet')}
+              </Text>
             </View>
           </View>
 
-          <Text style={styles.identityLabel}>YOUR PRIVATE NUMBER</Text>
+          <Text style={styles.identityLabel}>{t('settings.yourPrivateNumber')}</Text>
           <View style={styles.identityNumberRow}>
             <Text style={styles.identityNumber}>{formatPrivateNumber(rawNum)}</Text>
             <View style={styles.identityActions}>
@@ -192,7 +219,7 @@ export const SettingsScreen = () => {
                 activeOpacity={0.85}
               >
                 <Ionicons name="copy-outline" size={14} color={colors.primary} />
-                <Text style={[styles.copyBtnText, { color: colors.primary }]}>Copy</Text>
+                <Text style={[styles.copyBtnText, { color: colors.primary }]}>{t('settings.copy')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.shareBtn}
@@ -200,49 +227,61 @@ export const SettingsScreen = () => {
                 activeOpacity={0.85}
               >
                 <Ionicons name="share-outline" size={14} color={ON_PRIMARY} />
-                <Text style={styles.shareBtnText}>Share</Text>
+                <Text style={styles.shareBtnText}>{t('settings.share')}</Text>
               </TouchableOpacity>
             </View>
           </View>
         </TouchableOpacity>
 
         {/* ── Preferences ─────────────────────────────────────── */}
-        <SectionHeader label="PREFERENCES" colors={colors} />
+        <SectionHeader label={t('settings.preferences')} colors={colors} />
         <View style={styles.group}>
           <Row
             colors={colors}
             icon="notifications-outline"
-            label="Notifications"
-            subtitle="All chats · sounds on"
-            onPress={() => {}}
+            label={t('settings.notifications')}
+            subtitle={notificationsEnabled ? t('common.on') : t('common.off')}
+            onPress={() => dispatch(setNotificationsEnabledThunk(!notificationsEnabled))}
+            right={
+              <Switch
+                value={notificationsEnabled}
+                onValueChange={(v) => {
+                  dispatch(setNotificationsEnabledThunk(v));
+                }}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor="#fff"
+              />
+            }
           />
           <Row
             colors={colors}
             icon="lock-closed-outline"
-            label="Privacy & encryption"
-            subtitle="App lock · read receipts"
+            label={t('settings.privacy')}
+            subtitle={t('settings.privacySubtitle')}
             onPress={() => {}}
           />
           <Row
             colors={colors}
             icon="globe-outline"
-            label="Language"
+            label={t('settings.language')}
             right={
-              <Text style={[styles.rowValue, { color: colors.textSecondary }]}>English</Text>
+              <Text style={[styles.rowValue, { color: colors.textSecondary }]}>
+                {t('settings.languageName')}
+              </Text>
             }
-            onPress={() => {}}
+            onPress={() => setLanguageSheetVisible(true)}
             isLast
           />
         </View>
 
         {/* ── Account ─────────────────────────────────────────── */}
-        <SectionHeader label="ACCOUNT" colors={colors} />
+        <SectionHeader label={t('settings.account')} colors={colors} />
         <View style={styles.group}>
           <Row
             colors={colors}
             icon="person-add-outline"
-            label="Invite a friend"
-            subtitle="Send your private number"
+            label={t('settings.inviteFriend')}
+            subtitle={t('settings.inviteSubtitle')}
             onPress={handleShare}
             isLast
           />
@@ -253,6 +292,28 @@ export const SettingsScreen = () => {
           PrivaChat · v1.0  ·  end-to-end encrypted
         </Text>
       </ScrollView>
+
+      {/* Language picker */}
+      <BottomSheet visible={languageSheetVisible} onClose={() => setLanguageSheetVisible(false)}>
+        <View>
+          <Text style={[styles.sheetTitle, { color: colors.text }]}>
+            {t('settings.chooseLanguage')}
+          </Text>
+          {LANGUAGES.map((lang) => (
+            <TouchableOpacity
+              key={lang.code}
+              style={[styles.languageRow, { backgroundColor: colors.background }]}
+              onPress={() => handleSelectLanguage(lang.code)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.languageLabel, { color: colors.text }]}>{lang.label}</Text>
+              {language === lang.code ? (
+                <Ionicons name="checkmark" size={20} color={colors.primary} />
+              ) : null}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </BottomSheet>
     </View>
   );
 };
@@ -386,4 +447,16 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginTop: 8,
   },
+
+  /* Language sheet */
+  sheetTitle: { fontSize: 22, fontWeight: '700', marginBottom: 20 },
+  languageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  languageLabel: { fontSize: 15, fontWeight: '600' },
 });

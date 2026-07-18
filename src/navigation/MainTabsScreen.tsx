@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { selectTotalUnread } from '../store/slices/chatSlice';
 import { ChatListScreen } from '../screens/Main/ChatListScreen';
@@ -14,20 +15,22 @@ type TabKey = 'Chats' | 'Calls' | 'Contacts' | 'Settings';
 
 interface Tab {
   key: TabKey;
-  label: string;
+  /** i18n key — resolved with t() at render time so labels switch language live. */
+  labelKey: string;
   icon: string;
   activeIcon: string;
 }
 
 const TABS: Tab[] = [
-  { key: 'Chats', label: 'Chats', icon: 'chatbubble-outline', activeIcon: 'chatbubble' },
-  { key: 'Calls', label: 'Calls', icon: 'call-outline', activeIcon: 'call' },
-  { key: 'Contacts', label: 'Contacts', icon: 'people-outline', activeIcon: 'people' },
-  { key: 'Settings', label: 'You', icon: 'person-circle-outline', activeIcon: 'person-circle' },
+  { key: 'Chats', labelKey: 'tabs.chats', icon: 'chatbubble-outline', activeIcon: 'chatbubble' },
+  { key: 'Calls', labelKey: 'tabs.calls', icon: 'call-outline', activeIcon: 'call' },
+  { key: 'Contacts', labelKey: 'tabs.contacts', icon: 'people-outline', activeIcon: 'people' },
+  { key: 'Settings', labelKey: 'tabs.you', icon: 'person-circle-outline', activeIcon: 'person-circle' },
 ];
 
 export const MainTabsScreen = () => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>('Chats');
   const totalUnread = useSelector(selectTotalUnread);
@@ -88,7 +91,7 @@ export const MainTabsScreen = () => {
                   { color: isActive ? colors.primary : colors.textSecondary },
                 ]}
               >
-                {tab.label}
+                {t(tab.labelKey)}
               </Text>
             </TouchableOpacity>
           );

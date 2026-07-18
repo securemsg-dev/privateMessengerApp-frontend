@@ -1,4 +1,6 @@
 import React, { useEffect } from 'react';
+// Initialize i18next before any screen renders (side-effect import).
+import './src/i18n';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Provider } from 'react-redux';
 import { store } from './src/store';

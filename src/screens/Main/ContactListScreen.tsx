@@ -19,6 +19,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
 import { useSelector } from 'react-redux';
 
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../theme/ThemeContext';
 import { RootState } from '../../store';
 import {
@@ -37,12 +38,15 @@ interface Contact {
   name: string;
   /** The contact's 10-digit PrivaChat private number (stored in the legacy `phone` column). */
   privateNumber: string;
+  /** The contact's profile bio, refreshed on lookup. Null when they have none. */
+  bio: string | null;
 }
 
 interface ContactRow {
   id: string;
   name: string;
   phone: string;
+  bio: string | null;
 }
 
 const formatNumber = (raw: string): string => {
@@ -66,6 +70,7 @@ function groupByLetter(contacts: Contact[]) {
 
 export const ContactListScreen = () => {
   const { colors, isDark } = useTheme();
+  const { t } = useTranslation();
   const navigation = useNavigation<any>();
   const myPrivateNumber = useSelector((s: RootState) => s.auth.privateNumber);
 
@@ -88,6 +93,7 @@ export const ContactListScreen = () => {
           id: r.id,
           name: r.name || formatNumber(r.phone),
           privateNumber: r.phone,
+          bio: r.bio ?? null,
         }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     );
@@ -128,7 +134,7 @@ export const ContactListScreen = () => {
     try {
       const lookup = await lookupContactApi(rawDigits);
       if (!lookup.found || !lookup.user) {
-        setAddError('No PrivaChat user with that number');
+        setAddError(t('contacts.noUserFound'));
         return;
       }
       const user = lookup.user;
@@ -137,12 +143,13 @@ export const ContactListScreen = () => {
         user.display_name || formatNumber(user.private_number),
         user.private_number,
         true,
+        user.bio,
       );
       setAddVisible(false);
       await refreshContacts();
     } catch (err) {
       setAddError(
-        err instanceof ApiError ? err.detail : 'Could not look up that number',
+        err instanceof ApiError ? err.detail : t('contacts.lookupFailed'),
       );
     } finally {
       setAddBusy(false);
@@ -160,12 +167,12 @@ export const ContactListScreen = () => {
       const lookup = await lookupContactApi(contact.privateNumber);
       if (!lookup.found || !lookup.user) {
         Alert.alert(
-          'Contact unavailable',
-          'This user no longer exists on PrivaChat. Remove them from your contacts?',
+          t('contacts.contactUnavailableTitle'),
+          t('contacts.contactUnavailableBody'),
           [
-            { text: 'Keep', style: 'cancel' },
+            { text: t('common.keep'), style: 'cancel' },
             {
-              text: 'Remove',
+              text: t('common.remove'),
               style: 'destructive',
               onPress: async () => {
                 await deleteContact(contact.id);
@@ -178,6 +185,14 @@ export const ContactListScreen = () => {
       }
       const conv = await createConversationApi(contact.privateNumber);
       const other = conv.other_participant ?? lookup.user;
+      // Refresh the cached name/bio so the Contacts list stays current.
+      await saveContact(
+        other.id,
+        other.display_name || formatNumber(other.private_number),
+        other.private_number,
+        true,
+        other.bio,
+      );
       navigation.navigate('ChatScreen', {
         conversationId: conv.id,
         contactName: other.display_name || formatNumber(other.private_number),
@@ -187,8 +202,8 @@ export const ContactListScreen = () => {
       });
     } catch (err) {
       Alert.alert(
-        'Could not open chat',
-        err instanceof ApiError ? err.detail : 'Check your connection and try again.',
+        t('contacts.couldNotOpenChat'),
+        err instanceof ApiError ? err.detail : t('contacts.checkConnection'),
       );
     } finally {
       setOpeningId(null);
@@ -196,10 +211,10 @@ export const ContactListScreen = () => {
   };
 
   const handleLongPress = (contact: Contact) => {
-    Alert.alert('Remove contact', `Remove ${contact.name} from your contacts?`, [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('contacts.removeContactTitle'), t('contacts.removeContactBody', { name: contact.name }), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Remove',
+        text: t('common.remove'),
         style: 'destructive',
         onPress: async () => {
           await deleteContact(contact.id);
@@ -213,7 +228,7 @@ export const ContactListScreen = () => {
     if (!myPrivateNumber) return;
     try {
       await Share.share({
-        message: `Add me on PrivaChat — my private number is ${formatNumber(myPrivateNumber)}`,
+        message: t('contacts.shareInvite', { number: formatNumber(myPrivateNumber) }),
       });
     } catch {
       /* user dismissed the share sheet */
@@ -236,8 +251,8 @@ export const ContactListScreen = () => {
         <Text style={[styles.contactName, { color: colors.text }]} numberOfLines={1}>
           {item.name}
         </Text>
-        <Text style={[styles.contactPhone, { color: colors.textSecondary }]}>
-          {formatNumber(item.privateNumber)}
+        <Text style={[styles.contactPhone, { color: colors.textSecondary }]} numberOfLines={1}>
+          {item.bio ? `${formatNumber(item.privateNumber)} · ${item.bio}` : formatNumber(item.privateNumber)}
         </Text>
       </View>
       {openingId === item.id ? (
@@ -261,7 +276,7 @@ export const ContactListScreen = () => {
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.background }}>
         {/* Header */}
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Contacts</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{t('contacts.title')}</Text>
           <View style={styles.headerRight}>
             <TouchableOpacity style={styles.headerIcon} onPress={handleShareNumber}>
               <Ionicons name="share-outline" size={20} color={colors.textSecondary} />
@@ -277,7 +292,7 @@ export const ContactListScreen = () => {
           <Ionicons name="search-outline" size={18} color={colors.textSecondary} />
           <TextInput
             style={[styles.searchInput, { color: colors.text }]}
-            placeholder="Search contacts..."
+            placeholder={t('contacts.searchPlaceholder')}
             placeholderTextColor={colors.textSecondary}
             value={search}
             onChangeText={setSearch}
@@ -305,7 +320,7 @@ export const ContactListScreen = () => {
           ) : search.length > 0 ? (
             <View style={styles.emptyLoading}>
               <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                No contacts found
+                {t('contacts.noContactsFound')}
               </Text>
             </View>
           ) : (
@@ -315,10 +330,10 @@ export const ContactListScreen = () => {
               </View>
 
               <Text style={[styles.emptyHeadline, { color: colors.text }]}>
-                No contacts yet.
+                {t('contacts.emptyHeadline')}
               </Text>
               <Text style={[styles.emptyBody, { color: colors.textSecondary }]}>
-                People you add will appear here. They need to be on PrivaChat — or you can invite them to join.
+                {t('contacts.emptyBody')}
               </Text>
 
               <TouchableOpacity
@@ -327,7 +342,7 @@ export const ContactListScreen = () => {
                 onPress={openAddModal}
               >
                 <Ionicons name="add" size={18} color="#fff" />
-                <Text style={styles.primaryPillText}>Add a contact</Text>
+                <Text style={styles.primaryPillText}>{t('contacts.addContact')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -337,18 +352,18 @@ export const ContactListScreen = () => {
               >
                 <Ionicons name="shield-outline" size={16} color={colors.primary} />
                 <Text style={[styles.secondaryPillText, { color: colors.primary }]}>
-                  Share my private number
+                  {t('contacts.shareMyNumber')}
                 </Text>
               </TouchableOpacity>
 
               <View style={[styles.howCard, { backgroundColor: colors.surface }]}>
                 <Text style={[styles.howTitle, { color: colors.textSecondary }]}>
-                  HOW CONTACTS WORK
+                  {t('contacts.howTitle')}
                 </Text>
                 {[
-                  'Share your 10-digit private number with someone.',
-                  'They add you — or you add them — using that number.',
-                  'No phone number or email is ever exchanged.',
+                  t('contacts.howStep1'),
+                  t('contacts.howStep2'),
+                  t('contacts.howStep3'),
                 ].map((step, i) => (
                   <View key={i} style={styles.howStep}>
                     <View style={[styles.howNumWrap, { backgroundColor: `${colors.primary}1A` }]}>
@@ -384,9 +399,9 @@ export const ContactListScreen = () => {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <View style={[styles.modalCard, { backgroundColor: colors.background }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Add contact</Text>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>{t('contacts.addContactTitle')}</Text>
             <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
-              Enter their 10-digit private number
+              {t('contacts.modalSubtitle')}
             </Text>
             <TextInput
               style={[
@@ -409,7 +424,7 @@ export const ContactListScreen = () => {
             />
             {rawDigits === myPrivateNumber && rawDigits.length === 10 && (
               <Text style={[styles.modalError, { color: colors.error }]}>
-                That's your own number
+                {t('contacts.ownNumberError')}
               </Text>
             )}
             {addError && (
@@ -421,7 +436,7 @@ export const ContactListScreen = () => {
                 onPress={() => setAddVisible(false)}
                 disabled={addBusy}
               >
-                <Text style={[styles.modalBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+                <Text style={[styles.modalBtnText, { color: colors.textSecondary }]}>{t('common.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -437,7 +452,7 @@ export const ContactListScreen = () => {
                 {addBusy ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={[styles.modalBtnText, { color: '#fff' }]}>Add</Text>
+                  <Text style={[styles.modalBtnText, { color: '#fff' }]}>{t('common.add')}</Text>
                 )}
               </TouchableOpacity>
             </View>

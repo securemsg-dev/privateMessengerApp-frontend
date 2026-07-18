@@ -15,6 +15,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
 import { useSelector, useDispatch } from 'react-redux';
 
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../theme/ThemeContext';
 import { BottomSheet } from '../../components/BottomSheet';
 import { DropdownMenu } from '../../components/DropdownMenu';
@@ -68,6 +69,7 @@ const getInitials = (name: string) =>
 
 export const ChatListScreen = () => {
   const { colors, isDark } = useTheme();
+  const { t } = useTranslation();
   const navigation = useNavigation<any>();
   const dispatch = useDispatch<AppDispatch>();
 
@@ -174,16 +176,16 @@ export const ChatListScreen = () => {
 
   const handleDeleteAll = () => {
     if (conversations.length === 0) {
-      Alert.alert('No Chats', 'There are no chats to delete.');
+      Alert.alert(t('chats.noChatsTitle'), t('chats.noChatsBody'));
       return;
     }
     Alert.alert(
-      'Delete All Chats',
-      'Are you sure you want to delete all conversations? This action cannot be undone.',
+      t('chats.deleteAllTitle'),
+      t('chats.deleteAllBody'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: () => dispatch(deleteAllConversationsThunk()),
         },
@@ -192,17 +194,17 @@ export const ChatListScreen = () => {
   };
 
   const menuItems = [
-    { label: 'Start Chat', icon: 'chatbubble-outline', onPress: () => navigation.navigate('StartChat') },
-    { label: 'Create Group', icon: 'people-outline', onPress: () => navigation.navigate('CreateGroup') },
+    { label: t('chats.menuStartChat'), icon: 'chatbubble-outline', onPress: () => navigation.navigate('StartChat') },
+    { label: t('chats.menuCreateGroup'), icon: 'people-outline', onPress: () => navigation.navigate('CreateGroup') },
     {
-      label: 'Select All',
+      label: t('chats.menuSelectAll'),
       icon: 'checkbox-outline',
       onPress: () => {
         setSelectionMode(true);
         setSelectedIds(new Set(conversations.map((c) => c.id)));
       },
     },
-    { label: 'Delete All', icon: 'trash-outline', onPress: handleDeleteAll, destructive: true },
+    { label: t('chats.menuDeleteAll'), icon: 'trash-outline', onPress: handleDeleteAll, destructive: true },
   ];
 
   /* ── Swipe action handlers (Phase C.1: server-backed) ─────── */
@@ -249,9 +251,9 @@ export const ChatListScreen = () => {
       { is_pinned: next },
       (err) => {
         if (err instanceof ApiError && err.status === 409) {
-          Alert.alert('Pin limit reached', err.detail);
+          Alert.alert(t('chats.pinLimitTitle'), err.detail);
         } else {
-          Alert.alert("Couldn't update pin", 'Please try again.');
+          Alert.alert(t('chats.couldntUpdatePin'), t('common.tryAgain'));
         }
       },
     );
@@ -279,7 +281,7 @@ export const ChatListScreen = () => {
       conv,
       { muteUntil },
       { mute_seconds: seconds },
-      () => Alert.alert("Couldn't update mute", 'Please try again.'),
+      () => Alert.alert(t('chats.couldntUpdateMute'), t('common.tryAgain')),
     );
   };
 
@@ -321,7 +323,7 @@ export const ChatListScreen = () => {
         next.delete(id);
         return next;
       });
-      Alert.alert("Couldn't delete chat", 'Please try again.');
+      Alert.alert(t('chats.couldntDeleteChat'), t('common.tryAgain'));
     }
   };
 
@@ -447,7 +449,7 @@ export const ChatListScreen = () => {
         <Ionicons name="bookmark" size={18} color={colors.primary} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.notesTitle, { color: colors.text }]}>Notes to self</Text>
+        <Text style={[styles.notesTitle, { color: colors.text }]}>{t('chats.notesToSelf')}</Text>
         <Text style={[styles.notesSub, { color: colors.textSecondary }]} numberOfLines={1}>
           {selfConv?.lastMessage || '0 drafts · synced locally'}
         </Text>
@@ -618,7 +620,7 @@ export const ChatListScreen = () => {
                 {formatPrivateNumber(privateNumber)}
               </Text>
               <View style={styles.titleRow}>
-                <Text style={[styles.title, { color: colors.text }]}>Chats</Text>
+                <Text style={[styles.title, { color: colors.text }]}>{t('chats.title')}</Text>
                 <View style={styles.titleActions}>
                   <TouchableOpacity style={styles.headerIcon}>
                     <Ionicons name="search-outline" size={22} color={colors.text} />
@@ -639,10 +641,10 @@ export const ChatListScreen = () => {
       {/* Filter chips */}
       {!selectionMode && (
         <View style={styles.chipRow}>
-          <FilterChip label="All" filterKey="all" />
-          <FilterChip label="Unread" count={unreadCount} filterKey="unread" />
-          <FilterChip label="Groups" filterKey="groups" />
-          <FilterChip label="Pinned" count={pinnedCount} filterKey="pinned" />
+          <FilterChip label={t('chats.filterAll')} filterKey="all" />
+          <FilterChip label={t('chats.filterUnread')} count={unreadCount} filterKey="unread" />
+          <FilterChip label={t('chats.filterGroups')} filterKey="groups" />
+          <FilterChip label={t('chats.filterPinned')} count={pinnedCount} filterKey="pinned" />
         </View>
       )}
 
@@ -679,17 +681,17 @@ export const ChatListScreen = () => {
             </View>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>
               {activeFilter === 'unread'
-                ? 'No unread messages'
+                ? t('chats.emptyNoUnread')
                 : activeFilter === 'groups'
-                ? 'No groups yet'
+                ? t('chats.emptyNoGroups')
                 : activeFilter === 'pinned'
-                ? 'Nothing pinned'
-                : 'No chats yet'}
+                ? t('chats.emptyNothingPinned')
+                : t('chats.emptyNoChats')}
             </Text>
             <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
               {activeFilter === 'all'
-                ? 'Start a conversation with a contact'
-                : 'Try switching to All to see everything'}
+                ? t('chats.emptyStartHint')
+                : t('chats.emptySwitchHint')}
             </Text>
             {activeFilter === 'all' && (
               <TouchableOpacity
@@ -698,7 +700,7 @@ export const ChatListScreen = () => {
                 onPress={goToStartChat}
               >
                 <Ionicons name="add" size={20} color={ON_PRIMARY} />
-                <Text style={styles.emptyBtnText}>Start a New Chat</Text>
+                <Text style={styles.emptyBtnText}>{t('chats.startNewChat')}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -727,7 +729,7 @@ export const ChatListScreen = () => {
 
       <UndoToast
         visible={!!undoToast}
-        message={`Deleted "${undoToast?.name ?? ''}"`}
+        message={t('chats.deletedToast', { name: undoToast?.name ?? '' })}
         onUndo={handleUndoDelete}
         onDismiss={dismissUndoToast}
       />
@@ -737,9 +739,9 @@ export const ChatListScreen = () => {
           <View style={[styles.sheetIconWrap, { backgroundColor: colors.background }]}>
             <Ionicons name="notifications-outline" size={32} color={colors.primary} />
           </View>
-          <Text style={[styles.sheetTitle, { color: colors.text }]}>Don't Miss Out</Text>
+          <Text style={[styles.sheetTitle, { color: colors.text }]}>{t('chats.dontMissOut')}</Text>
           <Text style={[styles.sheetBody, { color: colors.textSecondary }]}>
-            Enable background activity in your device settings to receive call and message notifications.
+            {t('chats.dontMissOutBody')}
           </Text>
           <TouchableOpacity
             style={styles.checkboxRow}
@@ -752,7 +754,7 @@ export const ChatListScreen = () => {
               color={dontRemind ? colors.primary : colors.textSecondary}
             />
             <Text style={[styles.checkboxLabel, { color: colors.text }]}>
-              Don't remind again
+              {t('chats.dontRemindAgain')}
             </Text>
           </TouchableOpacity>
           <View style={styles.sheetBtns}>
@@ -764,7 +766,7 @@ export const ChatListScreen = () => {
                 style={[styles.sheetBtnSecondaryText, { color: colors.textSecondary }]}
                 numberOfLines={1}
               >
-                Not Now
+                {t('common.notNow')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -775,7 +777,7 @@ export const ChatListScreen = () => {
               }}
             >
               <Text style={styles.sheetBtnPrimaryText} numberOfLines={1}>
-                Open Settings
+                {t('chats.openSettings')}
               </Text>
             </TouchableOpacity>
           </View>

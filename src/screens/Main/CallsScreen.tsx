@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useSelector } from 'react-redux';
+import { useTranslation } from 'react-i18next';
 
 import { useTheme } from '../../theme/ThemeContext';
 import { CallDTO, listCallsApi } from '../../services/api';
@@ -72,20 +73,20 @@ const formatDuration = (secs: number): string => {
   return `${m}m ${s.toString().padStart(2, '0')}s`;
 };
 
-const labelForReason = (call: DisplayCall): string => {
+const labelKeyForReason = (call: DisplayCall): string => {
   const { endReason: reason, direction } = call;
-  if (reason === 'missed') return direction === 'incoming' ? 'Missed' : 'No answer';
-  if (reason === 'declined') return direction === 'incoming' ? 'Declined' : 'Declined';
-  if (reason === 'cancelled') return 'Cancelled';
-  if (reason === 'failed') return 'Failed';
-  if (reason === 'completed') return 'Completed';
+  if (reason === 'missed') return direction === 'incoming' ? 'calls.statusMissed' : 'calls.statusNoAnswer';
+  if (reason === 'declined') return 'calls.statusDeclined';
+  if (reason === 'cancelled') return 'calls.statusCancelled';
+  if (reason === 'failed') return 'calls.statusFailed';
+  if (reason === 'completed') return 'calls.statusCompleted';
   // No end reason recorded. Old rows (e.g. from a client that crashed
   // mid-setup) can't still be live — show them as unanswered/ended.
   const ageMs = Date.now() - new Date(call.startedAt).getTime();
   if (ageMs > STALE_CALL_MS) {
-    return call.acceptedAt ? 'Ended' : 'Not answered';
+    return call.acceptedAt ? 'calls.statusEnded' : 'calls.statusNotAnswered';
   }
-  return 'In progress';
+  return 'calls.statusInProgress';
 };
 
 const isMissed = (reason: CallDTO['end_reason'], direction: CallDirection) =>
@@ -93,6 +94,7 @@ const isMissed = (reason: CallDTO['end_reason'], direction: CallDirection) =>
 
 export const CallsScreen = () => {
   const { colors, isDark } = useTheme();
+  const { t } = useTranslation();
   const myUserId = useSelector((s: RootState) => s.auth.userId);
 
   const [calls, setCalls] = useState<DisplayCall[]>([]);
@@ -166,7 +168,7 @@ export const CallsScreen = () => {
 
   const renderItem = ({ item }: { item: DisplayCall }) => {
     const missed = isMissed(item.endReason, item.direction);
-    const reasonText = labelForReason(item);
+    const reasonText = t(labelKeyForReason(item));
     return (
       <View style={[styles.row, { borderBottomColor: colors.border }]}>
         <View style={[styles.avatar, { backgroundColor: colors.surface }]}>
@@ -187,7 +189,7 @@ export const CallsScreen = () => {
             {item.peerName ||
               (item.peerPrivateNumber
                 ? formatNumber(item.peerPrivateNumber)
-                : 'Unknown')}
+                : t('calls.statusUnknown'))}
           </Text>
           <Text style={[styles.subLabel, { color: colors.textSecondary }]}>
             {reasonText}
@@ -209,7 +211,7 @@ export const CallsScreen = () => {
 
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.background }}>
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Calls</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{t('calls.title')}</Text>
           <TouchableOpacity>
             <Ionicons name="search-outline" size={22} color={colors.textSecondary} />
           </TouchableOpacity>
@@ -225,7 +227,7 @@ export const CallsScreen = () => {
           <View style={[styles.emptyIconWrap, { backgroundColor: colors.surface }]}>
             <Ionicons name="call-outline" size={52} color={colors.textSecondary} />
           </View>
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>No calls yet</Text>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>{t('calls.emptyTitle')}</Text>
           <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
             Your call history will appear here
           </Text>
@@ -235,7 +237,7 @@ export const CallsScreen = () => {
             onPress={() => setDialpadVisible(true)}
           >
             <Ionicons name="keypad-outline" size={18} color="#fff" />
-            <Text style={[styles.emptyCallBtnText, { color: '#fff' }]}>Start a new call</Text>
+            <Text style={[styles.emptyCallBtnText, { color: '#fff' }]}>{t('calls.startNewCall')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
