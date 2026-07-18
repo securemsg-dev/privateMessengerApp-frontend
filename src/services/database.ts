@@ -38,6 +38,9 @@ export const initDB = async () => {
     try {
       await db.execAsync(`ALTER TABLE messages ADD COLUMN media_uri TEXT;`);
     } catch { /* column already exists */ }
+    try {
+      await db.execAsync(`ALTER TABLE contacts ADD COLUMN bio TEXT;`);
+    } catch { /* column already exists */ }
 
     console.log('Local DB Initialized successfully.');
   } catch (error) {
@@ -46,13 +49,19 @@ export const initDB = async () => {
 };
 
 // Functions to interact with the DB
-export const saveContact = async (id: string, name: string, phone: string, isRegistered: boolean) => {
+export const saveContact = async (
+  id: string,
+  name: string,
+  phone: string,
+  isRegistered: boolean,
+  bio?: string | null,
+) => {
   if (!db) return;
   try {
     const statement = await db.prepareAsync(
-      'INSERT OR REPLACE INTO contacts (id, name, phone, is_registered) VALUES (?, ?, ?, ?)'
+      'INSERT OR REPLACE INTO contacts (id, name, phone, is_registered, bio) VALUES (?, ?, ?, ?, ?)'
     );
-    await statement.executeAsync([id, name, phone, isRegistered ? 1 : 0]);
+    await statement.executeAsync([id, name, phone, isRegistered ? 1 : 0, bio ?? null]);
     await statement.finalizeAsync();
   } catch (error) {
     console.error('Failed to save contact', error);

@@ -42,6 +42,8 @@ interface AuthState {
   privateNumber: string | null;
   userId: string | null;
   displayName: string | null;
+  /** Current user's bio; null when unset. */
+  bio: string | null;
   /** Current user's profile_picture_key (blob id); null when none set. */
   profilePictureKey: string | null;
   status: 'idle' | 'loading' | 'error';
@@ -58,6 +60,7 @@ const initialState: AuthState = {
   privateNumber: null,
   userId: null,
   displayName: null,
+  bio: null,
   profilePictureKey: null,
   status: 'idle',
   error: null,
@@ -98,6 +101,9 @@ interface AuthResult {
   user: UserDTO;
   accessToken: string;
   refreshToken: string;
+  /** Present only on rehydrate (from /users/me) — login/register don't return them. */
+  bio?: string | null;
+  profilePictureKey?: string | null;
 }
 
 export const registerThunk = createAsyncThunk<
@@ -295,6 +301,8 @@ export const rehydrateThunk = createAsyncThunk<AuthResult | null, void>(
         },
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
+        bio: me.bio,
+        profilePictureKey: me.profile_picture_key,
       };
     } catch {
       await clearTokens();
@@ -312,6 +320,8 @@ function applyAuth(state: AuthState, payload: AuthResult) {
   state.userId = payload.user.id || state.userId;
   state.privateNumber = payload.user.private_number || state.privateNumber;
   state.displayName = payload.user.display_name ?? state.displayName;
+  if (payload.bio !== undefined) state.bio = payload.bio;
+  if (payload.profilePictureKey !== undefined) state.profilePictureKey = payload.profilePictureKey;
   state.status = 'idle';
   state.error = null;
 }
@@ -349,6 +359,11 @@ const authSlice = createSlice({
     // the user's own avatar updates everywhere immediately.
     setProfilePictureKey: (state, action: PayloadAction<string | null>) => {
       state.profilePictureKey = action.payload;
+    },
+    // Set after a bio save (or when /users/me is refreshed) so the bio shows
+    // on the Settings identity card without a second fetch.
+    setBio: (state, action: PayloadAction<string | null>) => {
+      state.bio = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -429,5 +444,6 @@ export const {
   lockApp,
   unlockApp,
   setProfilePictureKey,
+  setBio,
 } = authSlice.actions;
 export default authSlice.reducer;

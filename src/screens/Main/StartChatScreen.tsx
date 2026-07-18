@@ -76,6 +76,7 @@ export const StartChatScreen = () => {
         other.display_name || formatNumber(other.private_number),
         other.private_number,
         true,
+        other.bio,
       );
 
       navigation.navigate('ChatScreen', {

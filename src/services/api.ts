@@ -12,6 +12,8 @@
  *   - 401 is surfaced to caller — retry/refresh logic lives in thunks.
  */
 import Constants from 'expo-constants';
+// expo-file-system v19 (Expo SDK 54): uploadAsync lives under the legacy entry.
+import * as FileSystem from 'expo-file-system/legacy';
 import * as SecureStore from '../utils/secureStorage';
 
 /**
@@ -257,6 +259,8 @@ export interface UserPublicDTO {
   id: string;
   private_number: string;
   display_name: string | null;
+  /** Short profile bio (max 128 chars). Null when unset. */
+  bio: string | null;
   /** Base64 Curve25519 public key. Null until the user uploads one (Phase B). */
   public_key: string | null;
   /** Blob UUID stored in the media system. Use buildAvatarUrl() to get the download URL. */
@@ -352,6 +356,8 @@ export function uploadPublicKeyApi(publicKeyB64: string): Promise<UserPublicDTO>
  */
 export function patchMeApi(body: {
   display_name?: string;
+  /** Empty string clears the bio (server stores NULL); omit to leave unchanged. */
+  bio?: string;
   profile_picture_key?: string;
 }): Promise<UserPublicDTO> {
   return requestWithRefresh<UserPublicDTO>('/users/me', {
@@ -367,19 +373,40 @@ export function patchMeApi(body: {
  */
 export async function uploadBlobBytesApi(uploadUrl: string, fileUri: string): Promise<void> {
   const token = await SecureStore.getItemAsync(TOKEN_KEY);
-  const resp = await fetch(fileUri);
-  const blob = await resp.blob();
-  const putResp = await fetch(uploadUrl, {
-    method: 'PUT',
+  // RN's fetch() cannot reliably send raw file bytes as a request body — on
+  // Android it throws "Network request failed" after the bytes already reached
+  // the server. Stream the file with FileSystem.uploadAsync instead (same
+  // pattern as services/media.ts). Note: uploadAsync resolves on HTTP 4xx/5xx,
+  // so the status must be checked explicitly.
+  const result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
+    httpMethod: 'PUT',
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
     headers: {
       'Content-Type': 'application/octet-stream',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: blob,
   });
-  if (!putResp.ok) {
-    throw new ApiError(putResp.status, `Media upload failed: HTTP ${putResp.status}`);
+  if (result.status >= 400) {
+    throw new ApiError(result.status, `Media upload failed: HTTP ${result.status}`);
   }
+}
+
+/**
+ * POST /users/me/password — change the LOGIN password.
+ * Pass the caller's own refresh_token so their session survives the
+ * server-side invalidation of all other sessions.
+ * Errors: 403 wrong current password, 400 invalid new password.
+ */
+export function changePasswordApi(body: {
+  current_password: string;
+  new_password: string;
+  refresh_token?: string;
+}): Promise<{ message: string }> {
+  return requestWithRefresh('/users/me/password', {
+    method: 'POST',
+    auth: true,
+    body,
+  });
 }
 
 /**

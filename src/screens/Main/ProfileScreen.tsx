@@ -10,18 +10,20 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useDispatch, useSelector } from 'react-redux';
+import { useTranslation } from 'react-i18next';
 import * as ImagePicker from 'expo-image-picker';
 // expo-file-system v19 (Expo SDK 54) reshaped its API — the imperative helpers
 // used here (cacheDirectory / getInfoAsync with size) live under the legacy entry.
 import * as FileSystem from 'expo-file-system/legacy';
 
-import { logoutThunk, setProfilePictureKey } from '../../store/slices/authSlice';
+import { logoutThunk, setProfilePictureKey, setBio as setBioAction } from '../../store/slices/authSlice';
 import { withoutAppLock } from '../../utils/appLockGuard';
 import { RootState, AppDispatch } from '../../store';
 import { useTheme } from '../../theme/ThemeContext';
@@ -44,13 +46,17 @@ function avatarCachePath(blobId: string): string {
 
 export const ProfileScreen = () => {
   const { colors, isDark } = useTheme();
+  const { t } = useTranslation();
   const navigation = useNavigation<any>();
   const dispatch = useDispatch<AppDispatch>();
   const rawNum = useSelector((s: RootState) => s.auth.privateNumber);
-  const displayName = useSelector((s: RootState) => s.auth.displayName) ?? 'You';
+  const displayName = useSelector((s: RootState) => s.auth.displayName) ?? t('tabs.you');
   const fmt = (n: string) => `${n.slice(0, 2)}-${n.slice(2, 6)}-${n.slice(6, 10)}`;
 
   const [bio, setBio] = useState('');
+  // Last server-persisted bio — the Save button shows only when they differ.
+  const [savedBio, setSavedBio] = useState('');
+  const [savingBio, setSavingBio] = useState(false);
   const [showSignOut, setShowSignOut] = useState(false);
   const [keepHistory, setKeepHistory] = useState(true);
 
@@ -69,6 +75,9 @@ export const ProfileScreen = () => {
         }
         // Mirror into the store so the avatar shows on the Settings card too.
         dispatch(setProfilePictureKey(me.profile_picture_key ?? null));
+        setBio(me.bio ?? '');
+        setSavedBio(me.bio ?? '');
+        dispatch(setBioAction(me.bio ?? null));
       })
       .catch(() => { /* non-critical — profile still renders without avatar */ });
   }, [dispatch]);
@@ -106,7 +115,7 @@ export const ProfileScreen = () => {
     const result = await withoutAppLock(async () => {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please allow access to your photo library in Settings.');
+        Alert.alert(t('profile.permissionNeededTitle'), t('profile.permissionNeededBody'));
         return null;
       }
       return ImagePicker.launchImageLibraryAsync({
@@ -149,11 +158,40 @@ export const ProfileScreen = () => {
       setAvatarUri(localPath);
       dispatch(setProfilePictureKey(reservation.blob_id));
     } catch (err: any) {
-      const msg = err?.detail || err?.message || 'Upload failed. Please try again.';
+      const msg = err?.detail || err?.message || t('profile.uploadFailedBody');
       setUploadError(msg);
-      Alert.alert('Upload failed', msg);
+      Alert.alert(t('profile.uploadFailedTitle'), msg);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const bioDirty = bio.trim() !== savedBio;
+
+  const handleSaveBio = async () => {
+    const next = bio.trim();
+    setSavingBio(true);
+    try {
+      // Empty string clears the bio server-side (stored as NULL).
+      await patchMeApi({ bio: next });
+      setSavedBio(next);
+      setBio(next);
+      dispatch(setBioAction(next || null));
+    } catch (err: any) {
+      Alert.alert(t('profile.bioSaveFailed'), err?.detail || err?.message || t('common.tryAgain'));
+    } finally {
+      setSavingBio(false);
+    }
+  };
+
+  const handleShareNumber = async () => {
+    if (!rawNum) return;
+    try {
+      await Share.share({
+        message: t('settings.shareMessage', { number: fmt(rawNum) }),
+      });
+    } catch {
+      // User dismissed the share sheet — nothing to do.
     }
   };
 
@@ -172,7 +210,7 @@ export const ProfileScreen = () => {
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{t('profile.title')}</Text>
           <View style={{ width: 24 }} />
         </View>
       </SafeAreaView>
@@ -217,11 +255,11 @@ export const ProfileScreen = () => {
 
         {/* Bio */}
         <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: colors.primary }]}>Bio</Text>
+          <Text style={[styles.sectionLabel, { color: colors.primary }]}>{t('profile.bio')}</Text>
           <View style={[styles.bioWrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <TextInput
               style={[styles.bioInput, { color: colors.text }]}
-              placeholder="Write about yourself..."
+              placeholder={t('profile.bioPlaceholder')}
               placeholderTextColor={colors.textSecondary}
               multiline
               maxLength={128}
@@ -231,25 +269,45 @@ export const ProfileScreen = () => {
             <Text style={[styles.charCount, { color: colors.textSecondary }]}>{128 - bio.length}</Text>
           </View>
           <Text style={[styles.bioHint, { color: colors.textSecondary }]}>
-            You can write a few lines or leave it blank.
+            {t('profile.bioHint')}
           </Text>
+          {bioDirty ? (
+            <TouchableOpacity
+              style={[styles.bioSaveBtn, { backgroundColor: colors.primary }]}
+              onPress={handleSaveBio}
+              disabled={savingBio}
+              activeOpacity={0.85}
+            >
+              {savingBio ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.bioSaveBtnText}>{t('common.save')}</Text>
+              )}
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         {/* Menu items */}
         <View style={[styles.menuCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <TouchableOpacity style={[styles.menuRow, { borderBottomColor: colors.border }]}>
-            <Text style={[styles.menuLabel, { color: colors.primary }]}>Share Private Number</Text>
+          <TouchableOpacity
+            style={[styles.menuRow, { borderBottomColor: colors.border }]}
+            onPress={handleShareNumber}
+          >
+            <Text style={[styles.menuLabel, { color: colors.primary }]}>{t('profile.sharePrivateNumber')}</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.border} />
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.menuRow, { borderBottomColor: colors.border }]}>
-            <Text style={[styles.menuLabel, { color: colors.text }]}>Change Password</Text>
+          <TouchableOpacity
+            style={[styles.menuRow, { borderBottomColor: colors.border }]}
+            onPress={() => navigation.navigate('ChangePassword')}
+          >
+            <Text style={[styles.menuLabel, { color: colors.text }]}>{t('profile.changePassword')}</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.border} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuRowLast}
             onPress={() => setShowSignOut(true)}
           >
-            <Text style={[styles.menuLabel, { color: DANGER }]}>Sign Out</Text>
+            <Text style={[styles.menuLabel, { color: DANGER }]}>{t('profile.signOut')}</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.border} />
           </TouchableOpacity>
         </View>
@@ -258,10 +316,10 @@ export const ProfileScreen = () => {
       {/* Sign Out bottom sheet */}
       <BottomSheet visible={showSignOut} onClose={() => setShowSignOut(false)}>
         <View>
-          <Text style={[styles.sheetTitle, { color: colors.text }]}>Sign Out</Text>
+          <Text style={[styles.sheetTitle, { color: colors.text }]}>{t('profile.signOut')}</Text>
           <View style={[styles.toggleRow, { backgroundColor: colors.background }]}>
             <Text style={[styles.toggleLabel, { color: colors.text }]}>
-              Keep message history on this device
+              {t('profile.keepHistory')}
             </Text>
             <Switch
               value={keepHistory}
@@ -275,13 +333,13 @@ export const ProfileScreen = () => {
               style={[styles.sheetBtnCancel, { borderColor: colors.border }]}
               onPress={() => setShowSignOut(false)}
             >
-              <Text style={[styles.sheetBtnCancelText, { color: colors.textSecondary }]}>Cancel</Text>
+              <Text style={[styles.sheetBtnCancelText, { color: colors.textSecondary }]}>{t('common.cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.sheetBtnSignOut, { backgroundColor: DANGER }]}
               onPress={handleSignOut}
             >
-              <Text style={styles.sheetBtnSignOutText}>Sign Out</Text>
+              <Text style={styles.sheetBtnSignOutText}>{t('profile.signOut')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -335,6 +393,16 @@ const styles = StyleSheet.create({
   bioInput: { fontSize: 15, minHeight: 60 },
   charCount: { fontSize: 12, textAlign: 'right', marginTop: 4 },
   bioHint: { fontSize: 13 },
+  bioSaveBtn: {
+    alignSelf: 'flex-end',
+    borderRadius: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    marginTop: 4,
+    minWidth: 88,
+    alignItems: 'center',
+  },
+  bioSaveBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
   menuCard: { borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
   menuRow: {
     flexDirection: 'row',

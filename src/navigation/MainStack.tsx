@@ -6,10 +6,12 @@ import { ProfileScreen } from '../screens/Main/ProfileScreen';
 import { StartChatScreen } from '../screens/Main/StartChatScreen';
 import { ChatScreen } from '../screens/Main/ChatScreen';
 import { CreateGroupScreen } from '../screens/Main/CreateGroupScreen';
+import { ChangePasswordScreen } from '../screens/Main/ChangePasswordScreen';
 
 export type MainStackParamList = {
   MainTabs: undefined;
   Profile: undefined;
+  ChangePassword: undefined;
   StartChat: undefined;
   CreateGroup: undefined;
   ChatScreen: {
@@ -33,6 +35,7 @@ export const MainStack = () => {
     >
       <Stack.Screen name="MainTabs" component={MainTabsScreen} />
       <Stack.Screen name="Profile" component={ProfileScreen} />
+      <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
       <Stack.Screen name="StartChat" component={StartChatScreen} />
       <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
       <Stack.Screen name="ChatScreen" component={ChatScreen} />
