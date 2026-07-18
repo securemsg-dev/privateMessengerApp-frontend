@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { FlatList, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Message } from '../../../store/slices/chatSlice';
 import { BubbleRect } from '../../../components/MessageActionSheet';
@@ -25,6 +25,10 @@ interface Props {
   onReply: (m: Message) => void;
   onActionSheet: (m: Message, isSent: boolean, rect: BubbleRect) => void;
   onPlayVoice: (id: string, uri: string) => Promise<void>;
+  /** Fetch the next older history page. No-op when history is complete. */
+  onLoadOlder?: () => void;
+  /** True while an older page is in flight — shows the top spinner. */
+  loadingOlder?: boolean;
 }
 
 const InfoCard = ({ colors }: { colors: Colors }) => (
@@ -52,6 +56,8 @@ export const MessageList = ({
   onReply,
   onActionSheet,
   onPlayVoice,
+  onLoadOlder,
+  loadingOlder,
 }: Props) => {
   const renderItem = useCallback(
     ({ item, index }: { item: Message; index: number }) => {
@@ -75,6 +81,14 @@ export const MessageList = ({
     [senderId, contactName, colors, playingId, messages, onReply, onActionSheet, onPlayVoice],
   );
 
+  // The list is inverted, so the "footer" renders at the TOP of the thread —
+  // the right spot for both the self-chat info card and the older-page spinner.
+  const footer = isSelfChat ? (
+    <InfoCard colors={colors} />
+  ) : loadingOlder ? (
+    <ActivityIndicator size="small" color={colors.primary} style={{ paddingVertical: 12 }} />
+  ) : null;
+
   return (
     <FlatList
       data={[...messages].reverse()}
@@ -83,7 +97,11 @@ export const MessageList = ({
       inverted
       style={{ flex: 1 }}
       contentContainerStyle={styles.messageList}
-      ListFooterComponent={isSelfChat ? <InfoCard colors={colors} /> : null}
+      ListFooterComponent={footer}
+      // Inverted list: "end" = the top of the thread. Fires the older-page
+      // fetch as the user scrolls back through history.
+      onEndReached={onLoadOlder}
+      onEndReachedThreshold={0.3}
       keyboardShouldPersistTaps="handled"
     />
   );

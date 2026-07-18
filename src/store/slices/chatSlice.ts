@@ -5,7 +5,12 @@ import {
   getConversations,
   deleteAllMessages,
 } from '../../services/database';
-import { deleteConversationApi, listConversationsApi, listMessagesApi } from '../../services/api';
+import {
+  deleteConversationApi,
+  listConversationsApi,
+  listMessagesApi,
+  MessageDTO,
+} from '../../services/api';
 import {
   decryptOrFallback,
   MediaEnvelope,
@@ -91,6 +96,12 @@ interface ChatState {
   /** Conversation the user is currently viewing (ChatScreen open). Drives
    *  whether an incoming message_notification bumps the unread counter. */
   activeConversationId: string | null;
+  /** Server cursor for the NEXT (older) page of the active thread. Null when
+   *  the full history is loaded (or nothing is loaded yet). */
+  messagesCursor: string | null;
+  /** True while an older page is being fetched — drives the top spinner and
+   *  stops onEndReached from double-firing. */
+  loadingOlder: boolean;
 }
 
 const initialState: ChatState = {
@@ -98,6 +109,8 @@ const initialState: ChatState = {
   activeMessages: [],
   status: 'idle',
   activeConversationId: null,
+  messagesCursor: null,
+  loadingOlder: false,
 };
 
 const isSelfChatId = (conversationId: string) =>
@@ -219,8 +232,60 @@ export const hydrateConversationsThunk = createAsyncThunk<Conversation[] | null>
  * peer hasn't uploaded one yet — payloads will fall through as plaintext
  * (Phase A backward compatibility).
  */
+/** Decrypt one server MessageDTO into the local Message shape (used by both
+ *  the initial page load and older-page pagination). */
+async function decryptServerMessage(
+  m: MessageDTO,
+  peerPublicKey: string | null,
+): Promise<Message> {
+  const decrypted = await decryptOrFallback(m.encrypted_payload, peerPublicKey);
+  // After decrypt, the plaintext is either a normal text message or a JSON
+  // MediaEnvelope. We detect the latter and stash it; ChatScreen is
+  // responsible for downloading + decrypting the bytes off the critical path.
+  const envelope = parseMediaEnvelope(decrypted);
+  const content = envelope ? mediaPlaceholder(envelope.mime) : decrypted;
+
+  let replyPreview: ReplyPreview | null = null;
+  if (m.reply_preview) {
+    const previewContent = await decryptOrFallback(
+      m.reply_preview.encrypted_payload, peerPublicKey,
+    );
+    const previewEnvelope = parseMediaEnvelope(previewContent);
+    replyPreview = {
+      id: m.reply_preview.id,
+      senderId: m.reply_preview.sender_id,
+      type: m.reply_preview.message_type as MessageType,
+      content: previewEnvelope
+        ? mediaPlaceholder(previewEnvelope.mime)
+        : previewContent,
+    };
+  }
+  return {
+    id: m.id,
+    conversationId: m.conversation_id,
+    senderId: m.sender_id,
+    receiverId: '',
+    content,
+    type: m.message_type as MessageType,
+    mediaUri: undefined,
+    timestamp: m.created_at,
+    status: m.read_at ? 'read' : m.delivered_at ? 'delivered' : 'sent',
+    reactions: m.reactions.map((r) => ({
+      emoji: r.emoji,
+      count: r.count,
+      byMe: r.by_me,
+    })),
+    isStarred: m.is_starred,
+    replyToId: m.reply_to_id,
+    replyPreview,
+    deletedAt: m.deleted_at,
+    deletedBy: m.deleted_by,
+    mediaEnvelope: envelope,
+  };
+}
+
 export const loadMessagesThunk = createAsyncThunk<
-  Message[],
+  { messages: Message[]; nextCursor: string | null },
   { conversationId: string; peerPublicKey: string | null }
 >(
   'chat/loadMessages',
@@ -237,7 +302,7 @@ export const loadMessagesThunk = createAsyncThunk<
         timestamp: string;
         status: string;
       }>;
-      return rows.map<Message>((row) => ({
+      const selfMessages = rows.map<Message>((row) => ({
         id: row.id,
         conversationId: row.conversation_id,
         senderId: row.sender_id,
@@ -256,6 +321,8 @@ export const loadMessagesThunk = createAsyncThunk<
         deletedBy: null,
         mediaEnvelope: null, // self-chat media is inlined as local file URIs
       }));
+      // Self-chat loads the full local history in one go — no cursor.
+      return { messages: selfMessages, nextCursor: null };
     }
 
     // Server: newest-first; reverse to oldest-first. Decrypt every message
@@ -264,61 +331,46 @@ export const loadMessagesThunk = createAsyncThunk<
     const page = await listMessagesApi(conversationId);
     const ordered = page.messages.slice().reverse();
     const decrypted = await Promise.all(
-      ordered.map<Promise<Message>>(async (m) => {
-        const decrypted = await decryptOrFallback(
-          m.encrypted_payload, peerPublicKey,
-        );
-        // After decrypt, the plaintext is either a normal text message or
-        // a JSON MediaEnvelope. We detect the latter and stash it; ChatScreen
-        // is responsible for downloading + decrypting the bytes off the
-        // critical path.
-        const envelope = parseMediaEnvelope(decrypted);
-        const content = envelope
-          ? mediaPlaceholder(envelope.mime)
-          : decrypted;
-
-        let replyPreview: ReplyPreview | null = null;
-        if (m.reply_preview) {
-          const previewContent = await decryptOrFallback(
-            m.reply_preview.encrypted_payload, peerPublicKey,
-          );
-          const previewEnvelope = parseMediaEnvelope(previewContent);
-          replyPreview = {
-            id: m.reply_preview.id,
-            senderId: m.reply_preview.sender_id,
-            type: m.reply_preview.message_type as MessageType,
-            content: previewEnvelope
-              ? mediaPlaceholder(previewEnvelope.mime)
-              : previewContent,
-          };
-        }
-        return {
-          id: m.id,
-          conversationId: m.conversation_id,
-          senderId: m.sender_id,
-          receiverId: '',
-          content,
-          type: m.message_type as MessageType,
-          mediaUri: undefined,
-          timestamp: m.created_at,
-          status: m.read_at ? 'read' : m.delivered_at ? 'delivered' : 'sent',
-          reactions: m.reactions.map((r) => ({
-            emoji: r.emoji,
-            count: r.count,
-            byMe: r.by_me,
-          })),
-          isStarred: m.is_starred,
-          replyToId: m.reply_to_id,
-          replyPreview,
-          deletedAt: m.deleted_at,
-          deletedBy: m.deleted_by,
-          mediaEnvelope: envelope,
-        };
-      }),
+      ordered.map((m) => decryptServerMessage(m, peerPublicKey)),
     );
-    // Cache decrypted history so re-opening this chat paints instantly.
+    // Cache decrypted history (first page only) so re-opening paints instantly.
     void cacheSet(CACHE_KEYS.messages(conversationId), decrypted);
-    return decrypted;
+    return { messages: decrypted, nextCursor: page.next_cursor };
+  },
+);
+
+/**
+ * Fetch the next (older) page of the active thread using the server cursor
+ * and prepend it. `condition` guards against double-fires while a page is
+ * in flight and against firing when the history is already complete.
+ */
+export const loadOlderMessagesThunk = createAsyncThunk<
+  { conversationId: string; messages: Message[]; nextCursor: string | null },
+  { conversationId: string; peerPublicKey: string | null; before: string },
+  { state: { chat: ChatState } }
+>(
+  'chat/loadOlderMessages',
+  async ({ conversationId, peerPublicKey, before }) => {
+    const page = await listMessagesApi(conversationId, { before });
+    const ordered = page.messages.slice().reverse();
+    const decrypted = await Promise.all(
+      ordered.map((m) => decryptServerMessage(m, peerPublicKey)),
+    );
+    return {
+      conversationId,
+      messages: decrypted,
+      nextCursor: page.next_cursor,
+    };
+  },
+  {
+    condition: ({ conversationId }, { getState }) => {
+      const { chat } = getState();
+      return (
+        !chat.loadingOlder &&
+        chat.messagesCursor !== null &&
+        chat.activeConversationId === conversationId
+      );
+    },
   },
 );
 
@@ -429,6 +481,8 @@ const chatSlice = createSlice({
   reducers: {
     clearActiveMessages(state) {
       state.activeMessages = [];
+      state.messagesCursor = null;
+      state.loadingOlder = false;
     },
 
     /**
@@ -647,7 +701,24 @@ const chatSlice = createSlice({
       })
       // loadMessages
       .addCase(loadMessagesThunk.fulfilled, (state, action) => {
-        state.activeMessages = action.payload;
+        state.activeMessages = action.payload.messages;
+        state.messagesCursor = action.payload.nextCursor;
+      })
+      // loadOlderMessages — prepend, dedupe against anything already loaded,
+      // and advance the cursor. Ignore a late page for a chat we've left.
+      .addCase(loadOlderMessagesThunk.pending, (state) => {
+        state.loadingOlder = true;
+      })
+      .addCase(loadOlderMessagesThunk.fulfilled, (state, action) => {
+        state.loadingOlder = false;
+        if (action.payload.conversationId !== state.activeConversationId) return;
+        const existing = new Set(state.activeMessages.map((m) => m.id));
+        const older = action.payload.messages.filter((m) => !existing.has(m.id));
+        state.activeMessages = [...older, ...state.activeMessages];
+        state.messagesCursor = action.payload.nextCursor;
+      })
+      .addCase(loadOlderMessagesThunk.rejected, (state) => {
+        state.loadingOlder = false;
       })
       // Cached messages — apply only if we're still on that conversation and
       // the live fetch hasn't already filled the thread.

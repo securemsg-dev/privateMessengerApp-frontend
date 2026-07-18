@@ -14,6 +14,7 @@ import { useTheme } from '../../theme/ThemeContext';
 import { RootState, AppDispatch } from '../../store';
 import {
   loadMessagesThunk,
+  loadOlderMessagesThunk,
   hydrateMessagesThunk,
   clearActiveMessages,
   mergeConversation,
@@ -75,6 +76,8 @@ export const ChatScreen = () => {
   const privateNumber = useSelector((s: RootState) => s.auth.privateNumber);
   const displayName = useSelector((s: RootState) => s.auth.displayName);
   const messages = useSelector((s: RootState) => s.chat.activeMessages);
+  const messagesCursor = useSelector((s: RootState) => s.chat.messagesCursor);
+  const loadingOlder = useSelector((s: RootState) => s.chat.loadingOlder);
   // Peer avatar comes from the cached conversation (no need to thread through
   // navigation params); falls back to initials when the chat isn't listed yet.
   const conv = useSelector((s: RootState) =>
@@ -136,6 +139,20 @@ export const ChatScreen = () => {
     }
   }, [conversationId, peerPublicKey, isSelfChat, dispatch]);
 
+  // Older-history pagination: fired when the user scrolls to the top of the
+  // thread. The thunk's own `condition` guards against double-fires and
+  // no-ops once the full history is loaded (cursor null).
+  const handleLoadOlder = () => {
+    if (isSelfChat || !messagesCursor) return;
+    dispatch(
+      loadOlderMessagesThunk({
+        conversationId,
+        peerPublicKey,
+        before: messagesCursor,
+      }),
+    );
+  };
+
   // Mark this conversation active while open so incoming message_notifications
   // don't bump its unread counter (and clear unread now that it's read). On
   // unmount, release it so future messages here count as unread again.
@@ -193,6 +210,8 @@ export const ChatScreen = () => {
           onReply={handleReply}
           onActionSheet={(m, isSent, rect) => actions.openActionSheet(m, isSent, rect)}
           onPlayVoice={handlePlayVoice}
+          onLoadOlder={handleLoadOlder}
+          loadingOlder={loadingOlder}
         />
 
         {recorder.recMode === 'preview' ? (
