@@ -105,12 +105,15 @@ export function useChatSocket(
       }
       if (event.type === 'delivery' || event.type === 'read') {
         if (event.by_user_id === senderIdRef.current) return;
-        dispatch(
-          updateMessageStatus({
-            id: event.message_id,
-            status: event.type === 'read' ? 'read' : 'delivered',
-          }),
-        );
+        const ids = event.message_ids ?? [event.message_id];
+        for (const id of ids) {
+          dispatch(
+            updateMessageStatus({
+              id,
+              status: event.type === 'read' ? 'read' : 'delivered',
+            }),
+          );
+        }
         return;
       }
       if (event.type === 'reaction') {

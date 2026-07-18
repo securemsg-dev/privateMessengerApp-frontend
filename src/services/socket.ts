@@ -37,7 +37,10 @@ export interface ServerMessageEvent {
 export interface ServerReceiptEvent {
   type: 'delivery' | 'read';
   conversation_id: string;
+  /** First acknowledged id (legacy single-receipt field). */
   message_id: string;
+  /** Full batch of acknowledged ids — always present on new servers. */
+  message_ids?: string[];
   by_user_id: string;
   timestamp: string;
 }
@@ -85,7 +88,10 @@ export interface ClientMessageEvent {
 
 export interface ClientReceiptEvent {
   type: 'delivery' | 'read';
-  message_id: string;
+  /** Batched ids — one frame acks a whole page without tripping the server's
+   *  per-connection throttle. `message_id` (single) is also accepted. */
+  message_ids?: string[];
+  message_id?: string;
 }
 
 export interface ClientReactionEvent {
