@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "PrivaChat",
-    "slug": "privachat",
+    "name": "Cricchat",
+    "slug": "cricchat",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,16 +13,16 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.securemsg.app",
+      "bundleIdentifier": "com.securemsg.cricchat",
       "infoPlist": {
-        "NSCameraUsageDescription": "PrivaChat needs camera access to send photos and videos.",
-        "NSMicrophoneUsageDescription": "PrivaChat needs microphone access to send voice messages and make calls.",
-        "NSPhotoLibraryUsageDescription": "PrivaChat needs photo library access to send images and videos.",
+        "NSCameraUsageDescription": "Cricchat needs camera access to send photos and videos.",
+        "NSMicrophoneUsageDescription": "Cricchat needs microphone access to send voice messages and make calls.",
+        "NSPhotoLibraryUsageDescription": "Cricchat needs photo library access to send images and videos.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.securemsg.app",
+      "package": "com.securemsg.cricchat",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -51,22 +51,22 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow PrivaChat to access your photos.",
-          "cameraPermission": "Allow PrivaChat to access your camera."
+          "photosPermission": "Allow Cricchat to access your photos.",
+          "cameraPermission": "Allow Cricchat to access your camera."
         }
       ],
       [
         "expo-av",
         {
-          "microphonePermission": "Allow PrivaChat to access your microphone for voice messages."
+          "microphonePermission": "Allow Cricchat to access your microphone for voice messages."
         }
       ],
       "expo-notifications",
       [
         "@config-plugins/react-native-webrtc",
         {
-          "cameraPermission": "Allow PrivaChat to use your camera for calls.",
-          "microphonePermission": "Allow PrivaChat to use your microphone for calls."
+          "cameraPermission": "Allow Cricchat to use your camera for calls.",
+          "microphonePermission": "Allow Cricchat to use your microphone for calls."
         }
       ]
     ],

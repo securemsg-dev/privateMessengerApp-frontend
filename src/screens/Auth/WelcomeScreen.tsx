@@ -41,7 +41,7 @@ export const WelcomeScreen = () => {
       >
         {/* ── Kicker ─────────────────────────────────────────────────── */}
         <Text style={[styles.kicker, { color: colors.textSecondary }]}>
-          {'PRIVATE MESSENGER  ·  V1.0'}
+          {'CRICCHAT  ·  V1.0'}
         </Text>
 
         {/* ── Branding ───────────────────────────────────────────────── */}
@@ -49,7 +49,7 @@ export const WelcomeScreen = () => {
           <View style={[styles.logoCircle, { backgroundColor: colors.surface }]}>
             <Ionicons name="shield-checkmark" size={52} color={colors.primary} />
           </View>
-          <Text style={[styles.appName, { color: colors.text }]}>PrivaChat</Text>
+          <Text style={[styles.appName, { color: colors.text }]}>Cricchat</Text>
           <Text style={[styles.tagline, { color: colors.textSecondary }]}>
             Be Private. Be Secure.
           </Text>

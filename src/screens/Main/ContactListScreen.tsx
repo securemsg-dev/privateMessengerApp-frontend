@@ -36,7 +36,7 @@ import {
 interface Contact {
   id: string;
   name: string;
-  /** The contact's 10-digit PrivaChat private number (stored in the legacy `phone` column). */
+  /** The contact's 10-digit Cricchat private number (stored in the legacy `phone` column). */
   privateNumber: string;
   /** The contact's profile bio, refreshed on lookup. Null when they have none. */
   bio: string | null;

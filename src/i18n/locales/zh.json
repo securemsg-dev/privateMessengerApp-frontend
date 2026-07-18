@@ -70,17 +70,17 @@
     "searchPlaceholder": "搜索联系人…",
     "addContact": "添加联系人",
     "addContactTitle": "添加联系人",
-    "noUserFound": "没有找到使用该号码的 PrivaChat 用户",
+    "noUserFound": "没有找到使用该号码的 Cricchat 用户",
     "lookupFailed": "无法查询该号码",
     "removeContactTitle": "移除联系人",
     "removeContactBody": "将 {{name}} 从联系人中移除？",
     "contactUnavailableTitle": "联系人不可用",
-    "contactUnavailableBody": "该用户已不在 PrivaChat 上。要将其从联系人中移除吗？",
+    "contactUnavailableBody": "该用户已不在 Cricchat 上。要将其从联系人中移除吗？",
     "couldNotOpenChat": "无法打开聊天",
     "checkConnection": "请检查网络连接后重试。",
     "noContactsFound": "未找到联系人",
     "emptyHeadline": "还没有联系人。",
-    "emptyBody": "你添加的人会显示在这里。对方需要使用 PrivaChat——你也可以邀请他们加入。",
+    "emptyBody": "你添加的人会显示在这里。对方需要使用 Cricchat——你也可以邀请他们加入。",
     "shareMyNumber": "分享我的私密号码",
     "howTitle": "联系人使用说明",
     "howStep1": "把你的 10 位私密号码分享给对方。",
@@ -88,7 +88,7 @@
     "howStep3": "全程不会交换手机号或邮箱。",
     "modalSubtitle": "输入对方的 10 位私密号码",
     "ownNumberError": "这是你自己的号码",
-    "shareInvite": "在 PrivaChat 上加我 — 我的私密号码是 {{number}}"
+    "shareInvite": "在 Cricchat 上加我 — 我的私密号码是 {{number}}"
   },
   "settings": {
     "signedIn": "已登录",
@@ -109,7 +109,7 @@
     "share": "分享",
     "copiedTitle": "已复制",
     "copiedBody": "你的私密号码已复制到剪贴板。",
-    "shareMessage": "在 PrivaChat 上私密联系我 — 我的号码是 {{number}}。"
+    "shareMessage": "在 Cricchat 上私密联系我 — 我的号码是 {{number}}。"
   },
   "profile": {
     "title": "个人资料",

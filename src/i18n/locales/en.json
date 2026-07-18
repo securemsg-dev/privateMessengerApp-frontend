@@ -70,17 +70,17 @@
     "searchPlaceholder": "Search contacts...",
     "addContact": "Add a contact",
     "addContactTitle": "Add contact",
-    "noUserFound": "No PrivaChat user with that number",
+    "noUserFound": "No Cricchat user with that number",
     "lookupFailed": "Could not look up that number",
     "removeContactTitle": "Remove contact",
     "removeContactBody": "Remove {{name}} from your contacts?",
     "contactUnavailableTitle": "Contact unavailable",
-    "contactUnavailableBody": "This user no longer exists on PrivaChat. Remove them from your contacts?",
+    "contactUnavailableBody": "This user no longer exists on Cricchat. Remove them from your contacts?",
     "couldNotOpenChat": "Could not open chat",
     "checkConnection": "Check your connection and try again.",
     "noContactsFound": "No contacts found",
     "emptyHeadline": "No contacts yet.",
-    "emptyBody": "People you add will appear here. They need to be on PrivaChat — or you can invite them to join.",
+    "emptyBody": "People you add will appear here. They need to be on Cricchat — or you can invite them to join.",
     "shareMyNumber": "Share my private number",
     "howTitle": "HOW CONTACTS WORK",
     "howStep1": "Share your 10-digit private number with someone.",
@@ -88,7 +88,7 @@
     "howStep3": "No phone number or email is ever exchanged.",
     "modalSubtitle": "Enter their 10-digit private number",
     "ownNumberError": "That's your own number",
-    "shareInvite": "Add me on PrivaChat — my private number is {{number}}"
+    "shareInvite": "Add me on Cricchat — my private number is {{number}}"
   },
   "settings": {
     "signedIn": "SIGNED IN",
@@ -109,7 +109,7 @@
     "share": "Share",
     "copiedTitle": "Copied",
     "copiedBody": "Your private number is on the clipboard.",
-    "shareMessage": "Message me privately on PrivaChat — my number is {{number}}."
+    "shareMessage": "Message me privately on Cricchat — my number is {{number}}."
   },
   "profile": {
     "title": "Profile",

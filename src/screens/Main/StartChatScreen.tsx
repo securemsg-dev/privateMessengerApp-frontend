@@ -62,7 +62,7 @@ export const StartChatScreen = () => {
       //    show a friendlier error before mutating anything server-side).
       const lookup = await lookupContactApi(rawDigits);
       if (!lookup.found || !lookup.user) {
-        setServerError('No PrivaChat user with that number');
+        setServerError('No Cricchat user with that number');
         return;
       }
 

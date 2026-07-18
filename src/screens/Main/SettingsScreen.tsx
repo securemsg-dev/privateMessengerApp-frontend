@@ -289,7 +289,7 @@ export const SettingsScreen = () => {
 
         {/* ── Footer hint ─────────────────────────────────────── */}
         <Text style={[styles.footer, { color: colors.textSecondary }]}>
-          PrivaChat · v1.0  ·  end-to-end encrypted
+          Cricchat · v1.0  ·  end-to-end encrypted
         </Text>
       </ScrollView>
 

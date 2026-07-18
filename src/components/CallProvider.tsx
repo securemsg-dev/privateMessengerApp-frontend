@@ -223,7 +223,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       if (!granted) {
         Alert.alert(
           'Microphone access needed',
-          'PrivaChat needs the microphone to make voice calls. Please enable it in your system settings.',
+          'Cricchat needs the microphone to make voice calls. Please enable it in your system settings.',
         );
       }
       return granted;
@@ -494,7 +494,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       localStreamRef.current = stream;
 
       if (!lookupResult.found || !lookupResult.user) {
-        Alert.alert('Call failed', 'This user is no longer on PrivaChat.');
+        Alert.alert('Call failed', 'This user is no longer on Cricchat.');
         await cleanupCall();
         return;
       }
