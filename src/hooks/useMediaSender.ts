@@ -75,6 +75,9 @@ export function useMediaSender(
         message_type: wireType,
         encrypted_payload: payload,
         client_temp_id: localId,
+        // Lets the server delete the ciphertext file when this message is
+        // deleted for everyone (blob id inside the envelope is unreadable).
+        media_blob_id: envelope.blobId,
       });
     } catch (err) {
       if (__DEV__) console.warn('[media] upload failed, message not delivered:', err);

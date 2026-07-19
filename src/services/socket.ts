@@ -84,6 +84,12 @@ export interface ClientMessageEvent {
   self_destruct?: boolean;
   client_temp_id?: string;
   reply_to_id?: string;
+  /**
+   * Plaintext blob id for media messages. Used server-side ONLY for storage
+   * lifecycle (deleting the ciphertext file on delete-for-everyone / account
+   * deletion) — the content stays E2EE inside encrypted_payload.
+   */
+  media_blob_id?: string;
 }
 
 export interface ClientReceiptEvent {
