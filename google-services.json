@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "881351231643",
+    "project_id": "cricchat-63fb4",
+    "storage_bucket": "cricchat-63fb4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:881351231643:android:aa1b1f59c108ce54e2de3e",
+        "android_client_info": {
+          "package_name": "com.securemsg.cricchat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAmv7jsJrABwf6vUrSV_eL6wlhjgeS4Nxg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:881351231643:android:57338af92188e272e2de3e",
+        "android_client_info": {
+          "package_name": "com.securemsg.privachat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAmv7jsJrABwf6vUrSV_eL6wlhjgeS4Nxg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

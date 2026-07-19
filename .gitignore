@@ -42,3 +42,6 @@ yarn-error.*
 
 # --- Local EAS credential env (not committed) ---
 .easenv.local
+
+# Firebase service-account keys (push credentials — NEVER commit)
+*firebase-adminsdk*.json
