@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
+  Platform,
   TextInput,
   View,
 } from 'react-native';
@@ -192,13 +193,16 @@ export const ChatScreen = () => {
         />
       </SafeAreaView>
 
-      {/* `padding` on both platforms: with Android edge-to-edge the native
-          window no longer resizes for the keyboard, so we must lift the
-          composer in JS. KeyboardAvoidingView's padding math self-corrects if
-          the OS *does* resize, so this is safe cross-device. */}
+      {/* iOS: KAV `padding` tracks keyboardWillShow/Hide for smooth animated
+          avoidance (its bottom edge is the screen bottom, so no
+          keyboardVerticalOffset needed). Android (edge-to-edge, window never
+          resizes): RN's KAV recomputes padding from keyboardDidHide event
+          coordinates and can leave a stale gap after dismissal — so KAV is
+          disabled there (behavior undefined = plain View) and the spacer View
+          at the bottom, driven by useKeyboardHeight, is the sole mechanism. */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior="padding"
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <MessageList
           messages={messages}
@@ -266,7 +270,22 @@ export const ChatScreen = () => {
           </>
         )}
 
-        <View style={{ height: keyboardHeight > 0 ? 0 : bottomInset, backgroundColor: colors.background }} />
+        {/* Android: spacer = full keyboard height (endCoordinates.height is
+            measured from the physical screen bottom under edge-to-edge, so it
+            already covers the nav-bar inset — it replaces bottomInset, never
+            adds to it). iOS: KAV padding owns the keyboard; the spacer only
+            covers the home indicator while the keyboard is closed. */}
+        <View
+          style={{
+            height:
+              keyboardHeight > 0
+                ? Platform.OS === 'android'
+                  ? keyboardHeight
+                  : 0
+                : bottomInset,
+            backgroundColor: colors.background,
+          }}
+        />
       </KeyboardAvoidingView>
 
       <MessageActionSheet

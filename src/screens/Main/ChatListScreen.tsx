@@ -25,6 +25,10 @@ import { Avatar } from '../../components/Avatar';
 import { RootState, AppDispatch } from '../../store';
 import { getItemAsync, setItemAsync } from '../../utils/secureStorage';
 import {
+  areOsNotificationsGranted,
+  getNotificationsEnabledFlag,
+} from '../../services/push';
+import {
   loadConversationsThunk,
   hydrateConversationsThunk,
   deleteAllConversationsThunk,
@@ -108,9 +112,16 @@ export const ChatListScreen = () => {
   }, []);
 
   useEffect(() => {
+    // Show the background-activity reminder only when it's actually useful:
+    // not permanently dismissed, notifications not deliberately disabled
+    // in-app, and the OS permission not already granted (the permission is
+    // the closest readable proxy for "notifications will arrive").
     const checkNotificationPref = async () => {
       const stored = await getItemAsync('notification_dont_remind');
-      if (stored !== 'true') setShowNotification(true);
+      if (stored === 'true') return;
+      if (!getNotificationsEnabledFlag()) return;
+      if (await areOsNotificationsGranted()) return;
+      setShowNotification(true);
     };
     checkNotificationPref();
   }, []);

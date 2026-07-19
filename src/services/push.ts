@@ -25,6 +25,22 @@ export function getNotificationsEnabledFlag(): boolean {
 }
 
 /**
+ * Whether the OS-level notification permission is currently granted.
+ * Read-only — never triggers the permission prompt. Note: this is the best
+ * available proxy for "notifications will arrive"; true background-activity /
+ * battery-optimization state isn't readable without a native module.
+ */
+export async function areOsNotificationsGranted(): Promise<boolean> {
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    return status === 'granted';
+  } catch {
+    // If the check itself fails, assume granted so we don't nag incorrectly.
+    return true;
+  }
+}
+
+/**
  * Ensure Android channels exist, request permission, fetch the Expo push
  * token, and register it with the backend. Safe to call repeatedly.
  * Throws nothing — failures are logged and retried on the next auth change.
