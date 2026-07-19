@@ -21,6 +21,7 @@ import { useSelector } from 'react-redux';
 
 import { RootState } from '../store';
 import {
+  ApiError,
   buildUserWebSocketUrl,
   createCallApi,
   getWebRtcConfigApi,
@@ -41,6 +42,29 @@ const RING_TIMEOUT_MS = 30_000;
 // still catches it — the WS publish itself is fire-and-forget.
 const OFFER_RESEND_MS = 3_000;
 
+// Transient-network retry for the call-setup HTTP requests. A phone that was
+// just woken from a killed state by the incoming-call push routinely fails its
+// first fetch with "Network request failed" while the radio/network stack is
+// still coming up — retrying beats surfacing a dead-end alert. Only genuine
+// network-level failures are retried; ApiError (the server answered) is
+// deterministic and rethrown immediately.
+const NETWORK_RETRIES = 3;
+const NETWORK_RETRY_BASE_MS = 700;
+
+async function withNetworkRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < NETWORK_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, NETWORK_RETRY_BASE_MS * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 // The ICE/TURN config is identical for every user and its TURN credentials are
 // static env vars, so re-fetching it on every call setup just adds a network
 // round-trip to the dial latency. Cache it briefly and pre-warm on connect.
@@ -55,7 +79,7 @@ const fetchIceServers = async (force = false): Promise<any[]> => {
   ) {
     return iceServersCache.servers;
   }
-  const { ice_servers } = await getWebRtcConfigApi();
+  const { ice_servers } = await withNetworkRetry(() => getWebRtcConfigApi());
   // Native RTCPeerConnection (Android) throws "username == null" if an entry
   // carries username/credential keys with null values — only pass keys that
   // actually have a value.
@@ -485,7 +509,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       await setCallAudioMode(true, false);
 
       const [lookupResult, stream, iceServers] = await Promise.all([
-        lookupContactApi(contact.number),
+        withNetworkRetry(() => lookupContactApi(contact.number)),
         mediaDevices.getUserMedia({ audio: true, video: false }),
         fetchIceServers(),
       ]);
@@ -505,10 +529,12 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       pcRef.current = pc;
 
       // 3. Log the call in the backend now that setup can't silently fail
-      const callRecord = await createCallApi({
-        conversation_id: contact.conversationId,
-        callee_id: calleeId,
-      });
+      const callRecord = await withNetworkRetry(() =>
+        createCallApi({
+          conversation_id: contact.conversationId,
+          callee_id: calleeId,
+        }),
+      );
       createdCallId = callRecord.id;
       setCallState((prev) => (prev ? { ...prev, callId: callRecord.id } : prev));
 
@@ -648,9 +674,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       const answer = await (pc as any).createAnswer();
       await pc.setLocalDescription(answer);
 
-      // Record acceptance in backend
-      await updateCallApi(offer.callId, { accepted_at: new Date().toISOString() });
-
+      // The answer signal is what actually connects the call — send it first.
       sendSignal({
         type: 'call_answer',
         to_user_id: offer.fromUserId,
@@ -658,6 +682,12 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         call_id: offer.callId,
         sdp: answer.sdp,
       });
+
+      // Recording acceptance server-side is bookkeeping for the Calls tab —
+      // best-effort, never abort an already-answered call over it.
+      void withNetworkRetry(() =>
+        updateCallApi(offer.callId, { accepted_at: new Date().toISOString() }),
+      ).catch(() => {});
 
       // Answer sent — wait for ICE to actually connect before "Connected".
       setCallState((prev) =>
