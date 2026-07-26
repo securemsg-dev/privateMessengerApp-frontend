@@ -110,21 +110,18 @@ export const ProfileScreen = () => {
   const handlePickAvatar = async () => {
     setUploadError(null);
 
-    // Request permission + pick with the app lock suppressed, so the brief
-    // background while the system picker is open doesn't force a PIN re-entry.
-    const result = await withoutAppLock(async () => {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(t('profile.permissionNeededTitle'), t('profile.permissionNeededBody'));
-        return null;
-      }
-      return ImagePicker.launchImageLibraryAsync({
+    // Pick with the app lock suppressed, so the brief background while the
+    // system picker is open doesn't force a PIN re-entry. Uses the Android
+    // system photo picker (no READ_MEDIA_* permission needed) — Google Play's
+    // required pattern for on-demand media selection.
+    const result = await withoutAppLock(() =>
+      ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.7,
-      });
-    });
+      }),
+    );
     if (!result || result.canceled || !result.assets.length) return;
 
     const asset = result.assets[0];

@@ -11,17 +11,16 @@ export function useMediaPicker(
 ) {
   const handlePickFromGallery = async () => {
     closeTray();
-    const result = await withoutAppLock(async () => {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please allow access to your photo library in Settings.');
-        return null;
-      }
-      return ImagePicker.launchImageLibraryAsync({
+    // Uses the Android system photo picker (and iOS PHPicker), which grants
+    // one-off access to the single item the user chooses — so no
+    // READ_MEDIA_* runtime permission is requested. This is Google Play's
+    // required pattern for apps that only pick media on demand.
+    const result = await withoutAppLock(() =>
+      ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images', 'videos'],
         quality: 0.8,
-      });
-    });
+      }),
+    );
     if (result && !result.canceled && result.assets.length > 0) {
       const asset = result.assets[0];
       const isVideo = asset.type === 'video';
