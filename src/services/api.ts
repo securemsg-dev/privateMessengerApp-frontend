@@ -551,6 +551,103 @@ export function deleteMessageApi(
   });
 }
 
+// ── Safety — block & report ─────────────────────────────────────────────────
+// Required by Google Play's User Generated Content policy. See the backend at
+// app/api/v1/endpoints/moderation.py.
+
+export interface BlockedUserEntry {
+  user: UserPublicDTO;
+  blocked_at: string;
+}
+
+/**
+ * POST /blocks — block a user. Idempotent.
+ *
+ * Takes effect immediately and silently: their messages stop being stored or
+ * delivered and calls are refused both ways, but they are never told. Never
+ * surface "you have been blocked" anywhere in the UI of the blocked user.
+ */
+export function blockUserApi(userId: string): Promise<{ message: string }> {
+  return requestWithRefresh<{ message: string }>('/blocks', {
+    method: 'POST',
+    auth: true,
+    body: { user_id: userId },
+  });
+}
+
+/** DELETE /blocks/{id} — unblock. Idempotent; unblocking a non-blocked user is fine. */
+export function unblockUserApi(userId: string): Promise<{ message: string }> {
+  return requestWithRefresh<{ message: string }>(`/blocks/${userId}`, {
+    method: 'DELETE',
+    auth: true,
+  });
+}
+
+/** GET /blocks — the caller's blocked list, newest first. */
+export function listBlockedApi(): Promise<{ blocked: BlockedUserEntry[] }> {
+  return requestWithRefresh<{ blocked: BlockedUserEntry[] }>('/blocks', {
+    auth: true,
+  });
+}
+
+/**
+ * GET /blocks/{id} — has the CALLER blocked this user?
+ * Only ever reports your own outgoing block, never the reverse.
+ */
+export function blockStatusApi(userId: string): Promise<{ blocked: boolean }> {
+  return requestWithRefresh<{ blocked: boolean }>(`/blocks/${userId}`, {
+    auth: true,
+  });
+}
+
+export type ReportReason =
+  | 'spam'
+  | 'harassment'
+  | 'hate_speech'
+  | 'sexual_content'
+  | 'violence'
+  | 'child_safety'
+  | 'impersonation'
+  | 'other';
+
+export interface ReportEvidenceMessage {
+  message_id?: string;
+  sender_id?: string;
+  sent_at?: string;
+  /** DECRYPTED plaintext. Only ever populated after explicit user consent. */
+  content: string;
+}
+
+export interface ReportBody {
+  user_id: string;
+  reason: ReportReason;
+  details?: string;
+  conversation_id?: string;
+  /**
+   * Mirrors the consent checkbox. The server discards `messages` entirely
+   * unless this is true, so never set it without having actually asked.
+   */
+  include_messages?: boolean;
+  messages?: ReportEvidenceMessage[];
+}
+
+/**
+ * POST /reports — file an abuse report. Rate-limited to 10/hour server-side.
+ *
+ * The app is E2EE, so the server cannot see reported content on its own.
+ * Attaching `messages` is the only way a moderator can read what was sent —
+ * which is exactly why it requires the user to opt in first.
+ */
+export function reportUserApi(
+  body: ReportBody,
+): Promise<{ report_id: string; status: string; message: string }> {
+  return requestWithRefresh('/reports', {
+    method: 'POST',
+    auth: true,
+    body,
+  });
+}
+
 // ── WebRTC / Calls ───────────────────────────────────────────────────────────
 
 export interface IceServerConfig {

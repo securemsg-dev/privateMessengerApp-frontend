@@ -25,6 +25,8 @@ import { AttachmentTray } from '../../components/AttachmentTray';
 import { QuoteBar } from '../../components/QuoteBar';
 import { MessageActionSheet } from '../../components/MessageActionSheet';
 import { ForwardSheet } from '../../components/ForwardSheet';
+import { ChatOverflowMenu } from '../../components/ChatOverflowMenu';
+import { ReportSheet } from '../../components/ReportSheet';
 import { useCall } from '../../components/CallProvider';
 
 import { usePeerKeyLookup } from '../../hooks/usePeerKeyLookup';
@@ -38,6 +40,7 @@ import { useTextSender } from '../../hooks/useTextSender';
 import { useMediaPicker } from '../../hooks/useMediaPicker';
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder';
 import { useMessageActions } from '../../hooks/useMessageActions';
+import { useChatSafety } from '../../hooks/useChatSafety';
 
 import { ChatHeader } from './chat/ChatHeader';
 import { MessageList } from './chat/MessageList';
@@ -130,6 +133,9 @@ export const ChatScreen = () => {
   );
   const recorder = useVoiceRecorder(sendMediaAsset, closeTray);
   const actions = useMessageActions(dispatch, senderId, socketRef);
+  const safety = useChatSafety(
+    contactPrivateNumber, contactName, conversationId, isSelfChat, messages, senderId,
+  );
 
   // Load message history when peer key is ready
   useEffect(() => {
@@ -190,6 +196,7 @@ export const ChatScreen = () => {
           onBack={() => navigation.goBack()}
           onCall={handleCallPress}
           onCallLongPress={() => { /* reserved */ }}
+          onOverflow={() => safety.setMenuOpen(true)}
         />
       </SafeAreaView>
 
@@ -308,6 +315,26 @@ export const ChatScreen = () => {
         excludeIds={[conversationId]}
         onClose={() => actions.setForwardingMessage(null)}
         onPick={actions.performForward}
+      />
+
+      {/* Safety — block + report (Google Play UGC policy requirement). */}
+      <ChatOverflowMenu
+        visible={safety.menuOpen}
+        contactName={contactName}
+        isBlocked={safety.isBlocked}
+        actionsEnabled={!!safety.peerUserId}
+        onClose={() => safety.setMenuOpen(false)}
+        onToggleBlock={safety.toggleBlock}
+        onReport={safety.openReport}
+      />
+
+      <ReportSheet
+        visible={safety.reportOpen}
+        contactName={contactName}
+        availableEvidence={safety.availableEvidence}
+        submitting={safety.submitting}
+        onClose={() => safety.setReportOpen(false)}
+        onSubmit={safety.submitReport}
       />
     </View>
   );

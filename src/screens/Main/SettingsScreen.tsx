@@ -274,6 +274,21 @@ export const SettingsScreen = () => {
           />
         </View>
 
+        {/* ── Safety ──────────────────────────────────────────
+            Blocking and reporting are Google Play UGC policy requirements;
+            the reporting flow itself lives in each chat's ⋮ menu. */}
+        <SectionHeader label="SAFETY" colors={colors} />
+        <View style={styles.group}>
+          <Row
+            colors={colors}
+            icon="ban-outline"
+            label="Blocked users"
+            subtitle="Manage who can't contact you"
+            onPress={() => navigation.navigate('BlockedUsers')}
+            isLast
+          />
+        </View>
+
         {/* ── Account ─────────────────────────────────────────── */}
         <SectionHeader label={t('settings.account')} colors={colors} />
         <View style={styles.group}>

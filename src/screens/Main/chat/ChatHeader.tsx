@@ -22,6 +22,8 @@ interface Props {
   onBack: () => void;
   onCall: () => void;
   onCallLongPress: () => void;
+  /** Opens the ⋮ menu (block / report). Omitted for self-chat. */
+  onOverflow?: () => void;
 }
 
 const formatPrivateNumber = (n: string) => {
@@ -39,6 +41,7 @@ export const ChatHeader = ({
   onBack,
   onCall,
   onCallLongPress,
+  onOverflow,
 }: Props) => (
   <View style={[styles.header, { borderBottomColor: colors.border }]}>
     <TouchableOpacity onPress={onBack} style={styles.backBtn}>
@@ -84,8 +87,16 @@ export const ChatHeader = ({
         <Ionicons name="call-outline" size={22} color={colors.text} />
       </TouchableOpacity>
     )}
-    <TouchableOpacity style={styles.headerIcon}>
-      <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
-    </TouchableOpacity>
+    {/* Self-chat has nobody to block or report, so the menu is hidden there. */}
+    {!isSelfChat && (
+      <TouchableOpacity
+        style={styles.headerIcon}
+        onPress={onOverflow}
+        accessibilityLabel="More options"
+        accessibilityRole="button"
+      >
+        <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
+      </TouchableOpacity>
+    )}
   </View>
 );

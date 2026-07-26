@@ -7,6 +7,7 @@ import { StartChatScreen } from '../screens/Main/StartChatScreen';
 import { ChatScreen } from '../screens/Main/ChatScreen';
 import { CreateGroupScreen } from '../screens/Main/CreateGroupScreen';
 import { ChangePasswordScreen } from '../screens/Main/ChangePasswordScreen';
+import { BlockedUsersScreen } from '../screens/Main/BlockedUsersScreen';
 
 export type MainStackParamList = {
   MainTabs: undefined;
@@ -14,6 +15,7 @@ export type MainStackParamList = {
   ChangePassword: undefined;
   StartChat: undefined;
   CreateGroup: undefined;
+  BlockedUsers: undefined;
   ChatScreen: {
     conversationId: string;
     contactName: string;
@@ -39,6 +41,7 @@ export const MainStack = () => {
       <Stack.Screen name="StartChat" component={StartChatScreen} />
       <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
       <Stack.Screen name="ChatScreen" component={ChatScreen} />
+      <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
     </Stack.Navigator>
   );
 };
