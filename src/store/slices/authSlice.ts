@@ -15,6 +15,7 @@ import {
   CACHED_PRIVATE_NUMBER_KEY,
   clearPushTokenApi,
   confirmDeleteApi,
+  deleteAccountApi,
   getMeApi,
   loginApi,
   logoutApi,
@@ -188,6 +189,48 @@ export const confirmDeleteFromLoginThunk = createAsyncThunk<
     return rejectWithValue(errorMessage(err));
   }
   // Best-effort local cleanup — always runs after successful server delete.
+  try {
+    await wipeLocalData();
+  } catch {
+    /* ignore */
+  }
+  await clearTokens();
+  await clearCachedPrivateNumber();
+  await clearKeyPair();
+  await clearCache();
+});
+
+/**
+ * Authenticated self-service account deletion from Settings (App Store
+ * Guideline 5.1.1(v) / Google Play policy). Deletes the signed-in account via
+ * the caller's own session, then wipes all local data — same cleanup as the
+ * delete-password flow. On success the reducer clears auth and the app returns
+ * to the welcome screen.
+ */
+export const deleteAccountThunk = createAsyncThunk<
+  void,
+  void,
+  { rejectValue: string }
+>('auth/deleteAccount', async (_, { rejectWithValue }) => {
+  // Detach this device's push token first, so a deleted account can't keep
+  // receiving notifications. Best-effort — never blocks deletion.
+  try {
+    const pushToken = await SecureStore.getItemAsync(PUSH_TOKEN_KEY);
+    if (pushToken) {
+      await clearPushTokenApi(pushToken);
+      await SecureStore.deleteItemAsync(PUSH_TOKEN_KEY);
+    }
+  } catch {
+    /* push-token cleanup is best-effort */
+  }
+
+  try {
+    await deleteAccountApi();
+  } catch (err) {
+    return rejectWithValue(errorMessage(err));
+  }
+
+  // Server delete succeeded — wipe every local trace of the account.
   try {
     await wipeLocalData();
   } catch {
@@ -404,6 +447,15 @@ const authSlice = createSlice({
       })
       .addCase(confirmDeleteFromLoginThunk.fulfilled, clearAuth)
       .addCase(confirmDeleteFromLoginThunk.rejected, (s, a) => {
+        s.status = 'error';
+        s.error = a.payload ?? 'Delete failed';
+      })
+      .addCase(deleteAccountThunk.pending, (s) => {
+        s.status = 'loading';
+        s.error = null;
+      })
+      .addCase(deleteAccountThunk.fulfilled, clearAuth)
+      .addCase(deleteAccountThunk.rejected, (s, a) => {
         s.status = 'error';
         s.error = a.payload ?? 'Delete failed';
       })

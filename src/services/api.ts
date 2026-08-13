@@ -239,6 +239,13 @@ export function confirmDeleteApi(body: { delete_token: string }): Promise<{ mess
   return request('/auth/confirm-delete', { method: 'POST', body });
 }
 
+// Authenticated self-service deletion, reachable from Settings while signed in
+// (App Store Guideline 5.1.1(v) / Google Play account-deletion policy). Unlike
+// confirmDeleteApi, this uses the caller's own session — no delete token.
+export function deleteAccountApi(): Promise<{ message: string }> {
+  return request('/users/me', { method: 'DELETE' });
+}
+
 export function refreshApi(refreshToken: string): Promise<TokenPair> {
   return request<TokenPair>('/auth/refresh', {
     method: 'POST',

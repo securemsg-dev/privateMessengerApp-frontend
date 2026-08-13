@@ -24,6 +24,7 @@ import {
   setLanguageThunk,
   setNotificationsEnabledThunk,
 } from '../../store/slices/settingsSlice';
+import { deleteAccountThunk } from '../../store/slices/authSlice';
 import { useTheme } from '../../theme/ThemeContext';
 import { Avatar } from '../../components/Avatar';
 import { BottomSheet } from '../../components/BottomSheet';
@@ -155,6 +156,33 @@ export const SettingsScreen = () => {
   const handleSelectLanguage = (code: Language) => {
     setLanguageSheetVisible(false);
     if (code !== language) dispatch(setLanguageThunk(code));
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete account?',
+      'This permanently deletes your account, messages, media, and contacts '
+        + 'from this device and our servers. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: async () => {
+            const r = await dispatch(deleteAccountThunk());
+            if (deleteAccountThunk.rejected.match(r)) {
+              Alert.alert(
+                'Deletion failed',
+                (r.payload as string | undefined) ?? 'Please try again.',
+              );
+            }
+            // On success the auth state clears and RootNavigator returns to
+            // the welcome screen automatically.
+          },
+        },
+      ],
+      { cancelable: true },
+    );
   };
 
   return (
@@ -298,6 +326,14 @@ export const SettingsScreen = () => {
             label={t('settings.inviteFriend')}
             subtitle={t('settings.inviteSubtitle')}
             onPress={handleShare}
+          />
+          <Row
+            colors={colors}
+            icon="trash-outline"
+            label="Delete account"
+            subtitle="Permanently delete your account and data"
+            onPress={handleDeleteAccount}
+            destructive
             isLast
           />
         </View>
