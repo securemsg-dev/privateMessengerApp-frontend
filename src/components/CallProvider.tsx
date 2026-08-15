@@ -10,6 +10,7 @@ import React, {
 import { Alert, AppState, AppStateStatus, View } from 'react-native';
 import { CallScreen } from './CallScreen';
 import { IncomingCallBanner } from './IncomingCallBanner';
+import { ActiveCallBar, ACTIVE_CALL_BAR_HEIGHT } from './ActiveCallBar';
 import {
   RTCPeerConnection,
   RTCSessionDescription,
@@ -33,6 +34,11 @@ import * as SecureStore from '../utils/secureStorage';
 import { userSocketBus } from '../services/userSocketBus';
 import { useCallSounds } from '../hooks/useCallSounds';
 import { beginLockSuppression, endLockSuppression } from '../utils/appLockGuard';
+import {
+  ensureCallForegroundServiceRegistered,
+  startCallForegroundService,
+  stopCallForegroundService,
+} from '../services/callForegroundService';
 
 // How long an unanswered call rings before it auto-cancels (caller) / is
 // marked missed (callee). Matches the standard ~30s phone-app behaviour.
@@ -50,6 +56,23 @@ const OFFER_RESEND_MS = 3_000;
 // deterministic and rethrown immediately.
 const NETWORK_RETRIES = 3;
 const NETWORK_RETRY_BASE_MS = 700;
+
+// ── ICE resilience ───────────────────────────────────────────────────────────
+// A call that survives screen-off still has to survive the network churn that
+// comes with it: Wi-Fi power-save, a Wi-Fi→cellular handover on wake, a few
+// seconds of Doze. All of those show up as iceConnectionState 'disconnected'
+// and then 'failed', which used to hang the call up on the spot. Instead, give
+// the connection a chance to heal — first on its own, then via an ICE restart
+// (offerer side only, to avoid glare) — and only give up if nothing works.
+const ICE_DISCONNECT_GRACE_MS = 8_000;
+// A call that has ALREADY been connected gets a long window — the user is
+// mid-conversation and would rather wait out a tunnel than be hung up on. One
+// that never connected at all is a setup failure (no TURN relay, blocked
+// network); a restart rarely rescues it, so fail fast rather than leave the
+// caller staring at "Connecting…".
+const ICE_GIVE_UP_MS = 35_000;
+const ICE_GIVE_UP_SETUP_MS = 12_000;
+const MAX_ICE_RESTARTS = 3;
 
 async function withNetworkRetry<T>(fn: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
@@ -111,6 +134,12 @@ export interface CallState {
   contactName: string;
   contactPrivateNumber: string;
   startedAt: number;
+  /**
+   * Full-screen call UI collapsed to the ActiveCallBar so the user can browse
+   * chats / send messages while still on the call. Purely presentational — the
+   * peer connection is untouched either way.
+   */
+  minimized: boolean;
 }
 
 export interface CallContact {
@@ -128,6 +157,8 @@ interface CallContextValue {
   declineCall: () => Promise<void>;
   endCall: (reason?: string) => Promise<void>;
   expandIncoming: () => void;
+  minimizeCall: () => void;
+  restoreCall: () => void;
   toggleMute: () => void;
   toggleSpeaker: () => void;
 }
@@ -146,6 +177,8 @@ const CallContext = createContext<CallContextValue>({
   declineCall: noop,
   endCall: noop,
   expandIncoming: noopSync,
+  minimizeCall: noopSync,
+  restoreCall: noopSync,
   toggleMute: noopSync,
   toggleSpeaker: noopSync,
 });
@@ -160,6 +193,9 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   const [callState, setCallState] = useState<CallState | null>(null);
   const [muted, setMuted] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(false);
+  // True once the mic is actually captured — the trigger for the Android
+  // foreground service (see the effect below for why capture, not call start).
+  const [mediaActive, setMediaActive] = useState(false);
 
   // Ringback (outgoing) / ringtone (incoming) — stops once connecting/ended.
   useCallSounds(callState?.mode ?? null);
@@ -193,6 +229,28 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   const incomingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The full call_offer payload, kept so the resend interval can replay it.
   const outgoingOfferMsgRef = useRef<object | null>(null);
+
+  // ICE recovery. `iceRestartRef` is populated by the OFFERER only — the
+  // answerer must not fire its own restart or the two collide (glare).
+  const iceGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const iceGiveUpRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const iceRestartsRef = useRef(0);
+  const iceRestartRef = useRef<(() => Promise<void>) | null>(null);
+  // When the call FIRST connected. Kept out of callState so an ICE restart
+  // (which briefly drops us back to 'connecting') doesn't reset the on-screen
+  // call duration to 00:00.
+  const connectedAtRef = useRef<number | null>(null);
+
+  const clearIceTimers = useCallback(() => {
+    if (iceGraceRef.current) {
+      clearTimeout(iceGraceRef.current);
+      iceGraceRef.current = null;
+    }
+    if (iceGiveUpRef.current) {
+      clearTimeout(iceGiveUpRef.current);
+      iceGiveUpRef.current = null;
+    }
+  }, []);
 
   const clearCallTimers = useCallback(() => {
     if (outgoingTimeoutRef.current) {
@@ -274,20 +332,66 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     };
 
     // The UI must reflect whether MEDIA actually flows — not just that the
-    // answer SDP arrived. Promote to "connected" only once ICE establishes,
-    // and tear the call down if it permanently fails (e.g. no TURN relay).
+    // answer SDP arrived. Promote to "connected" only once ICE establishes.
+    //
+    // 'disconnected' and 'failed' are NOT immediate hang-ups: they are exactly
+    // what a screen-off, a Wi-Fi→cellular handover, or a few seconds of Doze
+    // look like, and the connection very often heals itself or after an ICE
+    // restart. Only a connection that stays broken past ICE_GIVE_UP_MS ends
+    // the call.
     const onIceState = () => {
       const state = (pc as any).iceConnectionState;
       console.log('[call] ICE state:', state);
+
       if (state === 'connected' || state === 'completed') {
+        clearIceTimers();
+        iceRestartsRef.current = 0;
+        if (connectedAtRef.current == null) connectedAtRef.current = Date.now();
+        const connectedAt = connectedAtRef.current;
         setCallState((prev) =>
           prev && prev.mode !== 'connected'
-            ? { ...prev, mode: 'connected', startedAt: Date.now() }
+            ? { ...prev, mode: 'connected', startedAt: connectedAt }
             : prev,
         );
-      } else if (state === 'failed') {
-        // Media will never flow on this pair — don't leave a silent "connected".
-        void endCallRef.current('failed');
+        return;
+      }
+
+      if (state !== 'disconnected' && state !== 'failed') return;
+
+      // Whichever state got us here, one hard deadline governs the recovery.
+      if (!iceGiveUpRef.current) {
+        const deadline =
+          connectedAtRef.current == null ? ICE_GIVE_UP_SETUP_MS : ICE_GIVE_UP_MS;
+        iceGiveUpRef.current = setTimeout(() => {
+          console.warn('[call] ICE never recovered — ending call');
+          void endCallRef.current('failed');
+        }, deadline);
+      }
+
+      const attemptRestart = () => {
+        iceGraceRef.current = null;
+        const restart = iceRestartRef.current;
+        if (!restart || iceRestartsRef.current >= MAX_ICE_RESTARTS) {
+          // Answerer side, or out of attempts: nothing to do but wait for the
+          // offerer's restart offer until the give-up timer fires.
+          return;
+        }
+        iceRestartsRef.current += 1;
+        console.log('[call] attempting ICE restart', iceRestartsRef.current);
+        void restart();
+      };
+
+      if (state === 'failed') {
+        // Terminal without intervention — restart now, don't wait out the grace.
+        if (iceGraceRef.current) {
+          clearTimeout(iceGraceRef.current);
+          iceGraceRef.current = null;
+        }
+        attemptRestart();
+      } else if (!iceGraceRef.current) {
+        // 'disconnected' frequently recovers on its own; give it a moment
+        // before spending a restart on it.
+        iceGraceRef.current = setTimeout(attemptRestart, ICE_DISCONNECT_GRACE_MS);
       }
     };
     (pc as any).oniceconnectionstatechange = onIceState;
@@ -296,12 +400,16 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     };
 
     return pc;
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clearIceTimers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Cleanup call ───────────────────────────────────────────────────────────
 
   const cleanupCall = useCallback(async () => {
     clearCallTimers();
+    clearIceTimers();
+    iceRestartsRef.current = 0;
+    iceRestartRef.current = null;
+    connectedAtRef.current = null;
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t: any) => t.stop());
       localStreamRef.current = null;
@@ -313,11 +421,16 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     }
     pendingIceRef.current = [];
     pendingOfferRef.current = null;
+    setMediaActive(false);
     setMuted(false);
     setSpeakerOn(false);
     setCallState(null);
     await setCallAudioMode(false);
-  }, [setCallAudioMode, clearCallTimers]);
+    // Belt-and-braces: the lifecycle effect below also stops the service when
+    // callState clears, but a call must never leave a stuck "Ongoing call"
+    // notification (and a held wake lock) behind.
+    await stopCallForegroundService();
+  }, [setCallAudioMode, clearCallTimers, clearIceTimers]);
 
   // ── User WebSocket management ───────────────────────────────────────────────
 
@@ -344,6 +457,32 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       const type: string = data.type;
 
       if (type === 'call_offer') {
+        // An ICE restart on the caller's side arrives as a fresh offer for the
+        // call we're already on. Renegotiate in place — no ringing, no new UI.
+        if (data.ice_restart && pcRef.current && pendingOfferRef.current?.callId === data.call_id) {
+          const pc = pcRef.current;
+          void (async () => {
+            try {
+              await pc.setRemoteDescription(
+                new RTCSessionDescription({ type: 'offer', sdp: data.sdp }),
+              );
+              const answer = await (pc as any).createAnswer();
+              await pc.setLocalDescription(answer);
+              ws.send(JSON.stringify({
+                type: 'call_answer',
+                to_user_id: data.from_user_id,
+                conversation_id: data.conversation_id,
+                call_id: data.call_id,
+                sdp: answer.sdp,
+              }));
+              console.log('[call] answered ICE-restart offer');
+            } catch (err) {
+              console.warn('[call] ICE-restart renegotiation failed:', err);
+            }
+          })();
+          return;
+        }
+
         // The caller re-sends the offer every few seconds while ringing, so
         // ignore duplicates for a call we're already handling (banner shown
         // or already accepted) — only the first one rings.
@@ -368,6 +507,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
           contactName,
           contactPrivateNumber,
           startedAt: Date.now(),
+          minimized: false,
         });
 
         // Auto-decline as "missed" if the user never picks up in time.
@@ -489,6 +629,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       contactName: contact.name,
       contactPrivateNumber: contact.number,
       startedAt: Date.now(),
+      minimized: false,
     });
 
     // Set on success; used by the catch to close the server row on failure
@@ -516,6 +657,8 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       // Track the stream immediately so cleanupCall always releases the mic,
       // even if we bail on the not-found path below.
       localStreamRef.current = stream;
+      // Mic is live — safe to raise the Android foreground service now.
+      setMediaActive(true);
 
       if (!lookupResult.found || !lookupResult.user) {
         Alert.alert('Call failed', 'This user is no longer on Cricchat.');
@@ -567,6 +710,29 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       };
       outgoingOfferMsgRef.current = offerMsg;
       sendSignal(offerMsg);
+
+      // We're the offerer, so we own ICE recovery for this call (the answerer
+      // deliberately has no restarter — two simultaneous restarts glare). The
+      // `ice_restart` flag tells the far side to renegotiate in place instead
+      // of ringing again, and tells the server not to re-push "Incoming call".
+      iceRestartRef.current = async () => {
+        const livePc = pcRef.current;
+        if (!livePc) return;
+        try {
+          const restartOffer = await (livePc as any).createOffer({ iceRestart: true });
+          await livePc.setLocalDescription(restartOffer);
+          sendSignal({
+            type: 'call_offer',
+            to_user_id: calleeId,
+            conversation_id: contact.conversationId,
+            call_id: callRecord.id,
+            sdp: restartOffer.sdp,
+            ice_restart: true,
+          });
+        } catch (err) {
+          console.warn('[call] ICE restart offer failed:', err);
+        }
+      };
 
       // Re-send while ringing so a recipient whose WS reconnects on
       // foreground (after the push) still receives the offer.
@@ -645,6 +811,8 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         fetchIceServers(),
       ]);
       localStreamRef.current = stream;
+      // Mic is live — safe to raise the Android foreground service now.
+      setMediaActive(true);
 
       const pc = createPeerConnection(iceServers);
       pcRef.current = pc;
@@ -777,6 +945,22 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     );
   }, []);
 
+  // ── Minimise / restore the call UI ──────────────────────────────────────────
+  // An un-answered incoming call has nothing to minimise to — it stays modal
+  // until the user accepts or declines.
+
+  const minimizeCall = useCallback(() => {
+    setCallState((prev) =>
+      prev && prev.mode !== 'incoming-banner' && prev.mode !== 'incoming-fullscreen'
+        ? { ...prev, minimized: true }
+        : prev,
+    );
+  }, []);
+
+  const restoreCall = useCallback(() => {
+    setCallState((prev) => (prev ? { ...prev, minimized: false } : prev));
+  }, []);
+
   // ── Mute / Speaker ─────────────────────────────────────────────────────────
 
   const toggleMute = useCallback(() => {
@@ -795,6 +979,36 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     await setCallAudioMode(true, newSpeaker);
   }, [speakerOn, setCallAudioMode]);
 
+  // ── Background survival (Android foreground service) ────────────────────────
+  // Android 9+ cuts microphone access to any process that isn't at foreground
+  // importance, so locking the screen mid-call silenced the mic and then killed
+  // the peer connection. A `microphone` foreground service holds that
+  // importance for as long as the call is up. No-op on iOS, where the `audio`
+  // background mode in app.json does the same job.
+  //
+  // Keyed on mediaActive (mic captured), NOT on "a call exists": Android 14+
+  // throws a SecurityException if a `microphone`-type service starts before
+  // RECORD_AUDIO is granted, and getUserMedia succeeding is the proof that it
+  // is. It also scopes the service correctly — a phone that is merely ringing
+  // has no capture to protect.
+  //
+  // Read the name inside the effect rather than depending on it, so renaming a
+  // contact mid-call can't stop and restart the service.
+  const serviceNameRef = useRef('');
+  serviceNameRef.current = callState?.contactName ?? '';
+
+  useEffect(() => {
+    ensureCallForegroundServiceRegistered();
+  }, []);
+
+  useEffect(() => {
+    if (!mediaActive) return;
+    void startCallForegroundService(serviceNameRef.current || 'Cricchat call');
+    return () => {
+      void stopCallForegroundService();
+    };
+  }, [mediaActive]);
+
   // ── Context value ───────────────────────────────────────────────────────────
 
   const value: CallContextValue = {
@@ -806,13 +1020,19 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     declineCall,
     endCall,
     expandIncoming,
+    minimizeCall,
+    restoreCall,
     toggleMute,
     toggleSpeaker,
   };
 
+  const minimized = callState?.minimized === true;
+
   return (
     <CallContext.Provider value={value}>
-      <View style={{ flex: 1 }}>
+      {/* Pad the app down while the call bar is up so it never covers a screen
+          header the user is trying to tap. */}
+      <View style={{ flex: 1, paddingTop: minimized ? ACTIVE_CALL_BAR_HEIGHT : 0 }}>
         {children}
 
         {callState?.mode === 'incoming-banner' && (
@@ -825,7 +1045,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
           />
         )}
 
-        {callState && callState.mode !== 'incoming-banner' && (
+        {callState && callState.mode !== 'incoming-banner' && !minimized && (
           <CallScreen
             mode={callState.mode}
             contactName={callState.contactName}
@@ -838,6 +1058,22 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
             onEnd={() => void endCall()}
             onToggleMute={toggleMute}
             onToggleSpeaker={() => void toggleSpeaker()}
+            // Only an answered / outgoing call can be minimised.
+            onMinimize={
+              callState.mode === 'incoming-fullscreen' ? undefined : minimizeCall
+            }
+          />
+        )}
+
+        {callState && minimized && callState.mode !== 'incoming-banner'
+          && callState.mode !== 'incoming-fullscreen' && (
+          <ActiveCallBar
+            mode={callState.mode}
+            contactName={callState.contactName}
+            startedAt={callState.startedAt}
+            muted={muted}
+            onRestore={restoreCall}
+            onEnd={() => void endCall()}
           />
         )}
       </View>

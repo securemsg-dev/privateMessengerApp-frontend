@@ -15,6 +15,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.securemsg.cricchat",
       "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ],
         "NSCameraUsageDescription": "Cricchat uses the camera when you choose to take a photo or video inside a conversation to send to a contact, or to capture a new profile picture. For example, tap the camera icon in a chat to take and send a photo.",
         "NSMicrophoneUsageDescription": "Cricchat uses the microphone when you record a voice message to send in a conversation, or during a voice or video call with a contact. For example, hold the microphone button in a chat to record and send a voice note.",
         "NSPhotoLibraryUsageDescription": "Cricchat accesses your photo library only when you choose to attach an existing photo or video to send in a conversation, or to set your profile picture. For example, tap the attachment icon in a chat to pick a photo to send.",
@@ -36,7 +39,11 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.BLUETOOTH",
-        "android.permission.BLUETOOTH_CONNECT"
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.WAKE_LOCK",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE"
       ]
     },
     "web": {
@@ -65,7 +72,8 @@
           "cameraPermission": "Allow Cricchat to use your camera for calls.",
           "microphonePermission": "Allow Cricchat to use your microphone for calls."
         }
-      ]
+      ],
+      "./plugins/withCallForegroundService"
     ],
     "extra": {
       "eas": {

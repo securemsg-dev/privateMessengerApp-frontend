@@ -31,6 +31,12 @@ interface Props {
   onEnd: () => void;
   onToggleMute: () => void;
   onToggleSpeaker: () => void;
+  /**
+   * Collapse to the ActiveCallBar so the user can use the rest of the app
+   * mid-call. Absent for an incoming call that hasn't been answered — there's
+   * nothing to go back to yet.
+   */
+  onMinimize?: () => void;
 }
 
 const formatPrivateNumber = (n: string) => {
@@ -145,6 +151,7 @@ export const CallScreen = ({
   onEnd,
   onToggleMute,
   onToggleSpeaker,
+  onMinimize,
 }: Props) => {
   const { colors } = useTheme();
   const [seconds, setSeconds] = useState(0);
@@ -173,12 +180,39 @@ export const CallScreen = ({
     : 'PRIVATE CALL · END-TO-END ENCRYPTED';
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onEnd}>
+    // Android hardware back minimises rather than hangs up — losing a call to a
+    // stray back-swipe is the kind of thing testers report as "it dropped".
+    // With nothing to minimise to (unanswered incoming), back is a no-op.
+    <Modal
+      visible
+      transparent
+      animationType="fade"
+      onRequestClose={onMinimize ?? (() => {})}
+    >
       <View style={[styles.root, { backgroundColor: colors.primary }]}>
         <StatusBar style="light" />
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-          {/* Top label */}
-          <Text style={styles.kicker}>{statusLabel}</Text>
+          {/* Top bar: minimise + status label */}
+          <View style={styles.topBar}>
+            {onMinimize ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Minimise call"
+                hitSlop={10}
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  onMinimize();
+                }}
+                style={({ pressed }) => [styles.minimiseBtn, pressed && { opacity: 0.6 }]}
+              >
+                <Ionicons name="chevron-down" size={24} color={ON_PRIMARY} />
+              </Pressable>
+            ) : (
+              <View style={styles.minimiseBtn} />
+            )}
+            <Text style={styles.kicker}>{statusLabel}</Text>
+            <View style={styles.minimiseBtn} />
+          </View>
 
           {/* Avatar block */}
           <View style={styles.avatarBlock}>
@@ -312,13 +346,24 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   safe: { flex: 1, paddingHorizontal: 24, justifyContent: 'space-between' },
 
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  minimiseBtn: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   kicker: {
+    flex: 1,
     color: 'rgba(255,255,255,0.75)',
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 2,
     textAlign: 'center',
-    marginTop: 12,
   },
 
   /* Avatar */
