@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,7 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../theme/ThemeContext';
@@ -100,156 +102,171 @@ export const ReportSheet = ({
       onRequestClose={handleClose}
       transparent={false}
     >
-      <SafeAreaView
-        style={[styles.root, { backgroundColor: colors.background }]}
-        edges={['top', 'bottom']}
-      >
-        <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          <Pressable onPress={handleClose} hitSlop={8} disabled={submitting}>
-            <Text style={[styles.cancel, { color: colors.primary }]}>Cancel</Text>
-          </Pressable>
-          <Text style={[styles.title, { color: colors.text }]}>Report</Text>
-          <Pressable
-            onPress={handleSubmit}
-            hitSlop={8}
-            disabled={!reason || submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : (
-              <Text
-                style={[
-                  styles.submit,
-                  { color: reason ? colors.danger : colors.textSecondary },
-                ]}
-              >
-                Submit
-              </Text>
-            )}
-          </Pressable>
-        </View>
-
-        <ScrollView
-          contentContainerStyle={styles.body}
-          keyboardShouldPersistTaps="handled"
+      {/*
+       * A Modal renders in its own native window on iOS, so it needs its own
+       * SafeAreaProvider — the app-root provider measures the app window, not
+       * this one, and without a provider in scope SafeAreaView pads by zero.
+       * That put Cancel/Submit under the iPhone status bar and out of reach.
+       */}
+      <SafeAreaProvider>
+        <SafeAreaView
+          style={[styles.root, { backgroundColor: colors.background }]}
+          edges={['top', 'bottom']}
         >
-          <Text style={[styles.lede, { color: colors.textSecondary }]}>
-            Tell us what {contactName} did. Reports are reviewed by a person
-            within 24 hours. {contactName} will not be told you reported them.
-          </Text>
-
-          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-            REASON
-          </Text>
-          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            {REASONS.map((opt, i) => {
-              const selected = reason === opt.value;
-              return (
-                <Pressable
-                  key={opt.value}
-                  onPress={() => setReason(opt.value)}
+          <View style={[styles.header, { borderBottomColor: colors.border }]}>
+            <Pressable onPress={handleClose} hitSlop={8} disabled={submitting}>
+              <Text style={[styles.cancel, { color: colors.primary }]}>Cancel</Text>
+            </Pressable>
+            <Text style={[styles.title, { color: colors.text }]}>Report</Text>
+            <Pressable
+              onPress={handleSubmit}
+              hitSlop={8}
+              disabled={!reason || submitting}
+            >
+              {submitting ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Text
                   style={[
-                    styles.reasonRow,
-                    i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+                    styles.submit,
+                    { color: reason ? colors.danger : colors.textSecondary },
                   ]}
                 >
-                  <View style={styles.reasonText}>
-                    <Text style={[styles.reasonLabel, { color: colors.text }]}>
-                      {opt.label}
-                    </Text>
-                    <Text style={[styles.reasonHint, { color: colors.textSecondary }]}>
-                      {opt.hint}
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name={selected ? 'radio-button-on' : 'radio-button-off'}
-                    size={20}
-                    color={selected ? colors.primary : colors.textSecondary}
-                  />
-                </Pressable>
-              );
-            })}
+                  Submit
+                </Text>
+              )}
+            </Pressable>
           </View>
 
-          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-            WHAT HAPPENED (OPTIONAL)
-          </Text>
-          <TextInput
-            value={details}
-            onChangeText={setDetails}
-            placeholder="Add any context that would help us review this."
-            placeholderTextColor={colors.textSecondary}
-            multiline
-            maxLength={2000}
-            style={[
-              styles.detailsInput,
-              {
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
-                color: colors.text,
-              },
-            ]}
-          />
+          {/* Keeps the "what happened" box above the iOS keyboard. */}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.flex}
+          >
+            <ScrollView
+              contentContainerStyle={styles.body}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={[styles.lede, { color: colors.textSecondary }]}>
+                Tell us what {contactName} did. Reports are reviewed by a person
+                within 24 hours. {contactName} will not be told you reported them.
+              </Text>
 
-          {evidenceCount > 0 && (
-            <>
               <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-                EVIDENCE
+                REASON
               </Text>
               <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                {REASONS.map((opt, i) => {
+                  const selected = reason === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={() => setReason(opt.value)}
+                      style={[
+                        styles.reasonRow,
+                        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+                      ]}
+                    >
+                      <View style={styles.reasonText}>
+                        <Text style={[styles.reasonLabel, { color: colors.text }]}>
+                          {opt.label}
+                        </Text>
+                        <Text style={[styles.reasonHint, { color: colors.textSecondary }]}>
+                          {opt.hint}
+                        </Text>
+                      </View>
+                      <Ionicons
+                        name={selected ? 'radio-button-on' : 'radio-button-off'}
+                        size={20}
+                        color={selected ? colors.primary : colors.textSecondary}
+                      />
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
+                WHAT HAPPENED (OPTIONAL)
+              </Text>
+              <TextInput
+                value={details}
+                onChangeText={setDetails}
+                placeholder="Add any context that would help us review this."
+                placeholderTextColor={colors.textSecondary}
+                multiline
+                maxLength={2000}
+                style={[
+                  styles.detailsInput,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
+              />
+
+              {evidenceCount > 0 && (
+                <>
+                  <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
+                    EVIDENCE
+                  </Text>
+                  <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <View style={styles.switchRow}>
+                      <View style={styles.switchText}>
+                        <Text style={[styles.reasonLabel, { color: colors.text }]}>
+                          Include recent messages
+                        </Text>
+                        <Text style={[styles.reasonHint, { color: colors.textSecondary }]}>
+                          Sends the last {evidenceCount} message
+                          {evidenceCount === 1 ? '' : 's'} from {contactName} to our
+                          moderators — unencrypted.
+                        </Text>
+                      </View>
+                      <Switch
+                        value={includeMessages}
+                        onValueChange={setIncludeMessages}
+                        trackColor={{ true: colors.primary }}
+                      />
+                    </View>
+                  </View>
+                  <Text style={[styles.consentNote, { color: colors.textSecondary }]}>
+                    Cricchat is end-to-end encrypted, so we cannot read your chats.
+                    Turning this on decrypts those messages on your device and sends
+                    copies to us so a moderator can see what was sent. Nothing else
+                    in your account becomes readable, and your report is reviewed
+                    either way.
+                  </Text>
+                </>
+              )}
+
+              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border, marginTop: 20 }]}>
                 <View style={styles.switchRow}>
                   <View style={styles.switchText}>
                     <Text style={[styles.reasonLabel, { color: colors.text }]}>
-                      Include recent messages
+                      Also block {contactName}
                     </Text>
                     <Text style={[styles.reasonHint, { color: colors.textSecondary }]}>
-                      Sends the last {evidenceCount} message
-                      {evidenceCount === 1 ? '' : 's'} from {contactName} to our
-                      moderators — unencrypted.
+                      Stops their messages and calls reaching you, right away.
                     </Text>
                   </View>
                   <Switch
-                    value={includeMessages}
-                    onValueChange={setIncludeMessages}
+                    value={alsoBlock}
+                    onValueChange={setAlsoBlock}
                     trackColor={{ true: colors.primary }}
                   />
                 </View>
               </View>
-              <Text style={[styles.consentNote, { color: colors.textSecondary }]}>
-                Cricchat is end-to-end encrypted, so we cannot read your chats.
-                Turning this on decrypts those messages on your device and sends
-                copies to us so a moderator can see what was sent. Nothing else
-                in your account becomes readable, and your report is reviewed
-                either way.
-              </Text>
-            </>
-          )}
-
-          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border, marginTop: 20 }]}>
-            <View style={styles.switchRow}>
-              <View style={styles.switchText}>
-                <Text style={[styles.reasonLabel, { color: colors.text }]}>
-                  Also block {contactName}
-                </Text>
-                <Text style={[styles.reasonHint, { color: colors.textSecondary }]}>
-                  Stops their messages and calls reaching you, right away.
-                </Text>
-              </View>
-              <Switch
-                value={alsoBlock}
-                onValueChange={setAlsoBlock}
-                trackColor={{ true: colors.primary }}
-              />
-            </View>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  flex: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

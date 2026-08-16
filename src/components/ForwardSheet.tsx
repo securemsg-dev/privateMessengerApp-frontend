@@ -7,7 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
 
@@ -50,68 +50,73 @@ export const ForwardSheet = ({ visible, excludeIds, onClose, onPick }: Props) =>
       animationType="slide"
       onRequestClose={onClose}
     >
-      <SafeAreaView
-        style={[styles.root, { backgroundColor: colors.background }]}
-        edges={['top', 'bottom']}
-      >
-        <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          <Pressable onPress={onClose} hitSlop={8}>
-            <Text style={[styles.cancel, { color: colors.primary }]}>Cancel</Text>
-          </Pressable>
-          <Text style={[styles.title, { color: colors.text }]}>Forward to</Text>
-          <View style={{ width: 56 }} />
-        </View>
-
-        <FlatList
-          data={targets}
-          keyExtractor={(c) => c.id}
-          renderItem={({ item }) => (
-            <Pressable
-              style={({ pressed }) => [
-                styles.row,
-                {
-                  backgroundColor: pressed ? colors.surface : 'transparent',
-                  borderBottomColor: colors.border,
-                },
-              ]}
-              onPress={() => onPick(item)}
-            >
-              <View
-                style={[
-                  styles.avatar,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-              >
-                <Text style={[styles.avatarText, { color: colors.textSecondary }]}>
-                  {getInitials(item.contactName || '#')}
-                </Text>
-              </View>
-              <View style={styles.rowMain}>
-                <Text style={[styles.rowName, { color: colors.text }]} numberOfLines={1}>
-                  {item.contactName || item.contactPrivateNumber || item.id}
-                </Text>
-                {item.lastMessage ? (
-                  <Text
-                    style={[styles.rowSub, { color: colors.textSecondary }]}
-                    numberOfLines={1}
-                  >
-                    {item.lastMessage}
-                  </Text>
-                ) : null}
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+      {/* Own provider: a Modal is a separate native window, so it does not
+       * inherit the app-root safe-area measurement (iOS pads by zero without
+       * this and the header lands under the status bar). */}
+      <SafeAreaProvider>
+        <SafeAreaView
+          style={[styles.root, { backgroundColor: colors.background }]}
+          edges={['top', 'bottom']}
+        >
+          <View style={[styles.header, { borderBottomColor: colors.border }]}>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Text style={[styles.cancel, { color: colors.primary }]}>Cancel</Text>
             </Pressable>
-          )}
-          ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <Ionicons name="people-outline" size={36} color={colors.textSecondary} />
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                No other conversations available to forward to.
-              </Text>
-            </View>
-          }
-        />
-      </SafeAreaView>
+            <Text style={[styles.title, { color: colors.text }]}>Forward to</Text>
+            <View style={{ width: 56 }} />
+          </View>
+
+          <FlatList
+            data={targets}
+            keyExtractor={(c) => c.id}
+            renderItem={({ item }) => (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.row,
+                  {
+                    backgroundColor: pressed ? colors.surface : 'transparent',
+                    borderBottomColor: colors.border,
+                  },
+                ]}
+                onPress={() => onPick(item)}
+              >
+                <View
+                  style={[
+                    styles.avatar,
+                    { backgroundColor: colors.surface, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[styles.avatarText, { color: colors.textSecondary }]}>
+                    {getInitials(item.contactName || '#')}
+                  </Text>
+                </View>
+                <View style={styles.rowMain}>
+                  <Text style={[styles.rowName, { color: colors.text }]} numberOfLines={1}>
+                    {item.contactName || item.contactPrivateNumber || item.id}
+                  </Text>
+                  {item.lastMessage ? (
+                    <Text
+                      style={[styles.rowSub, { color: colors.textSecondary }]}
+                      numberOfLines={1}
+                    >
+                      {item.lastMessage}
+                    </Text>
+                  ) : null}
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </Pressable>
+            )}
+            ListEmptyComponent={
+              <View style={styles.emptyWrap}>
+                <Ionicons name="people-outline" size={36} color={colors.textSecondary} />
+                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                  No other conversations available to forward to.
+                </Text>
+              </View>
+            }
+          />
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 };

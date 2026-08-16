@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useCall } from './CallProvider';
@@ -63,58 +63,62 @@ export const DialpadModal = ({ visible, onClose }: Props) => {
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
       <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={handleClose} />
       <View style={[styles.sheet, { backgroundColor: colors.background }]}>
-        <SafeAreaView edges={['bottom'] as const}>
-          <View style={styles.handle} />
+        {/* Modal content sits in its own native window, so it needs a provider
+         * of its own for the bottom inset to clear the iOS home indicator. */}
+        <SafeAreaProvider style={styles.provider}>
+          <SafeAreaView edges={['bottom'] as const}>
+            <View style={styles.handle} />
 
-          {/* Close */}
-          <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-            <Ionicons name="close" size={22} color={colors.textSecondary} />
-          </TouchableOpacity>
-
-          {/* Number display */}
-          <View style={styles.numberRow}>
-            <Text
-              style={[styles.numberText, { color: colors.text }]}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-            >
-              {number || ' '}
-            </Text>
-            {number.length > 0 && (
-              <TouchableOpacity onPress={handleDelete} onLongPress={() => setNumber('')} style={styles.backspaceBtn}>
-                <Ionicons name="backspace-outline" size={24} color={colors.textSecondary} />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Keypad grid */}
-          {KEYS.map((row, ri) => (
-            <View key={ri} style={styles.row}>
-              {row.map((key) => (
-                <TouchableOpacity
-                  key={key}
-                  style={[styles.key, { backgroundColor: colors.surface }]}
-                  activeOpacity={0.65}
-                  onPress={() => handlePress(key)}
-                >
-                  <Text style={[styles.keyText, { color: colors.text }]}>{key}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ))}
-
-          {/* Call button */}
-          <View style={styles.callRow}>
-            <TouchableOpacity
-              style={[styles.callBtn, { backgroundColor: '#22c55e', opacity: number.length === 0 || calling ? 0.4 : 1 }]}
-              activeOpacity={0.8}
-              disabled={number.length === 0 || calling}
-              onPress={handleCall}
-            >
-              <Ionicons name="call" size={26} color="#fff" />
+            {/* Close */}
+            <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
+              <Ionicons name="close" size={22} color={colors.textSecondary} />
             </TouchableOpacity>
-          </View>
-        </SafeAreaView>
+
+            {/* Number display */}
+            <View style={styles.numberRow}>
+              <Text
+                style={[styles.numberText, { color: colors.text }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                {number || ' '}
+              </Text>
+              {number.length > 0 && (
+                <TouchableOpacity onPress={handleDelete} onLongPress={() => setNumber('')} style={styles.backspaceBtn}>
+                  <Ionicons name="backspace-outline" size={24} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Keypad grid */}
+            {KEYS.map((row, ri) => (
+              <View key={ri} style={styles.row}>
+                {row.map((key) => (
+                  <TouchableOpacity
+                    key={key}
+                    style={[styles.key, { backgroundColor: colors.surface }]}
+                    activeOpacity={0.65}
+                    onPress={() => handlePress(key)}
+                  >
+                    <Text style={[styles.keyText, { color: colors.text }]}>{key}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))}
+
+            {/* Call button */}
+            <View style={styles.callRow}>
+              <TouchableOpacity
+                style={[styles.callBtn, { backgroundColor: '#22c55e', opacity: number.length === 0 || calling ? 0.4 : 1 }]}
+                activeOpacity={0.8}
+                disabled={number.length === 0 || calling}
+                onPress={handleCall}
+              >
+                <Ionicons name="call" size={26} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </SafeAreaProvider>
       </View>
     </Modal>
   );
@@ -125,6 +129,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
   },
+  provider: { flex: 0 },
   sheet: {
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,

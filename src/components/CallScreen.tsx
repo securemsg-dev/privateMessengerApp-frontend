@@ -7,7 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
@@ -191,149 +191,154 @@ export const CallScreen = ({
     >
       <View style={[styles.root, { backgroundColor: colors.primary }]}>
         <StatusBar style="light" />
-        <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-          {/* Top bar: minimise + status label */}
-          <View style={styles.topBar}>
-            {onMinimize ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Minimise call"
-                hitSlop={10}
-                onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
-                  onMinimize();
-                }}
-                style={({ pressed }) => [styles.minimiseBtn, pressed && { opacity: 0.6 }]}
-              >
-                <Ionicons name="chevron-down" size={24} color={ON_PRIMARY} />
-              </Pressable>
-            ) : (
-              <View style={styles.minimiseBtn} />
-            )}
-            <Text style={styles.kicker}>{statusLabel}</Text>
-            <View style={styles.minimiseBtn} />
-          </View>
-
-          {/* Avatar block */}
-          <View style={styles.avatarBlock}>
-            <View style={styles.avatarRingHost}>
-              {(isOutgoing || isIncoming || isConnecting) && (
-                <PulsingRings color="rgba(255,255,255,0.55)" />
+        {/* Own provider: Modal content lives in a separate native window and
+         * would otherwise get zero insets on iOS, pushing the call controls
+         * under the status bar / home indicator. */}
+        <SafeAreaProvider>
+          <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+            {/* Top bar: minimise + status label */}
+            <View style={styles.topBar}>
+              {onMinimize ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Minimise call"
+                  hitSlop={10}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    onMinimize();
+                  }}
+                  style={({ pressed }) => [styles.minimiseBtn, pressed && { opacity: 0.6 }]}
+                >
+                  <Ionicons name="chevron-down" size={24} color={ON_PRIMARY} />
+                </Pressable>
+              ) : (
+                <View style={styles.minimiseBtn} />
               )}
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{getInitials(contactName)}</Text>
-              </View>
+              <Text style={styles.kicker}>{statusLabel}</Text>
+              <View style={styles.minimiseBtn} />
             </View>
 
-            <Text style={styles.name} numberOfLines={1}>
-              {contactName}
-            </Text>
-
-            {isConnected ? (
-              <View style={styles.connectedRow}>
-                <View style={styles.connectedDot} />
-                <Text style={styles.connectedText}>
-                  CONNECTED  ·  {formatDuration(seconds)}
-                </Text>
+            {/* Avatar block */}
+            <View style={styles.avatarBlock}>
+              <View style={styles.avatarRingHost}>
+                {(isOutgoing || isIncoming || isConnecting) && (
+                  <PulsingRings color="rgba(255,255,255,0.55)" />
+                )}
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{getInitials(contactName)}</Text>
+                </View>
               </View>
-            ) : isConnecting ? (
-              <Text style={styles.subline}>Connecting…</Text>
-            ) : (
-              <Text style={styles.subline}>
-                {formatPrivateNumber(contactNumber) || 'Calling…'}
+
+              <Text style={styles.name} numberOfLines={1}>
+                {contactName}
               </Text>
-            )}
 
+              {isConnected ? (
+                <View style={styles.connectedRow}>
+                  <View style={styles.connectedDot} />
+                  <Text style={styles.connectedText}>
+                    CONNECTED  ·  {formatDuration(seconds)}
+                  </Text>
+                </View>
+              ) : isConnecting ? (
+                <Text style={styles.subline}>Connecting…</Text>
+              ) : (
+                <Text style={styles.subline}>
+                  {formatPrivateNumber(contactNumber) || 'Calling…'}
+                </Text>
+              )}
+
+              {isConnected && (
+                <View style={styles.encryptionPill}>
+                  <Ionicons name="lock-closed" size={11} color={ON_PRIMARY} />
+                  <Text style={styles.encryptionText}>End-to-end encrypted</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Controls — only when connected */}
             {isConnected && (
-              <View style={styles.encryptionPill}>
-                <Ionicons name="lock-closed" size={11} color={ON_PRIMARY} />
-                <Text style={styles.encryptionText}>End-to-end encrypted</Text>
+              <View style={styles.controlsRow}>
+                <ControlButton
+                  icon={muted ? 'mic-off' : 'mic-off-outline'}
+                  label="Mute"
+                  active={muted}
+                  onPress={onToggleMute}
+                />
+                <ControlButton
+                  icon={speakerOn ? 'volume-high' : 'volume-high-outline'}
+                  label="Speaker"
+                  active={speakerOn}
+                  onPress={onToggleSpeaker}
+                />
               </View>
             )}
-          </View>
 
-          {/* Controls — only when connected */}
-          {isConnected && (
-            <View style={styles.controlsRow}>
-              <ControlButton
-                icon={muted ? 'mic-off' : 'mic-off-outline'}
-                label="Mute"
-                active={muted}
-                onPress={onToggleMute}
-              />
-              <ControlButton
-                icon={speakerOn ? 'volume-high' : 'volume-high-outline'}
-                label="Speaker"
-                active={speakerOn}
-                onPress={onToggleSpeaker}
-              />
-            </View>
-          )}
-
-          {/* Bottom action area */}
-          <View style={styles.bottomArea}>
-            {isIncoming ? (
-              <View style={styles.dualBtnRow}>
-                <View style={styles.dualBtnCol}>
+            {/* Bottom action area */}
+            <View style={styles.bottomArea}>
+              {isIncoming ? (
+                <View style={styles.dualBtnRow}>
+                  <View style={styles.dualBtnCol}>
+                    <Pressable
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        onDecline();
+                      }}
+                      style={({ pressed }) => [
+                        styles.bigCallBtn,
+                        { backgroundColor: DECLINE_BG, opacity: pressed ? 0.85 : 1 },
+                      ]}
+                    >
+                      <Ionicons name="call" size={28} color={ON_PRIMARY} style={{ transform: [{ rotate: '135deg' }] }} />
+                    </Pressable>
+                    <Text style={styles.bigBtnLabel}>Decline</Text>
+                  </View>
+                  <View style={styles.dualBtnCol}>
+                    <Pressable
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+                        onAccept();
+                      }}
+                      style={({ pressed }) => [
+                        styles.bigCallBtn,
+                        { backgroundColor: ACCEPT_BG, opacity: pressed ? 0.85 : 1 },
+                      ]}
+                    >
+                      <Ionicons name="call" size={28} color={ON_PRIMARY} />
+                    </Pressable>
+                    <Text style={styles.bigBtnLabel}>Accept</Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.singleBtnCol}>
                   <Pressable
                     onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                      onDecline();
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+                      onEnd();
                     }}
                     style={({ pressed }) => [
                       styles.bigCallBtn,
                       { backgroundColor: DECLINE_BG, opacity: pressed ? 0.85 : 1 },
                     ]}
                   >
-                    <Ionicons name="call" size={28} color={ON_PRIMARY} style={{ transform: [{ rotate: '135deg' }] }} />
+                    <Ionicons
+                      name="call"
+                      size={28}
+                      color={ON_PRIMARY}
+                      style={{ transform: [{ rotate: '135deg' }] }}
+                    />
                   </Pressable>
-                  <Text style={styles.bigBtnLabel}>Decline</Text>
+                  <Text style={styles.bigBtnLabel}>End call</Text>
+                  {(isOutgoing || isConnecting) && (
+                    <Text style={styles.dialingText}>
+                      {isConnecting ? 'Connecting…' : 'Calling…'}
+                    </Text>
+                  )}
                 </View>
-                <View style={styles.dualBtnCol}>
-                  <Pressable
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-                      onAccept();
-                    }}
-                    style={({ pressed }) => [
-                      styles.bigCallBtn,
-                      { backgroundColor: ACCEPT_BG, opacity: pressed ? 0.85 : 1 },
-                    ]}
-                  >
-                    <Ionicons name="call" size={28} color={ON_PRIMARY} />
-                  </Pressable>
-                  <Text style={styles.bigBtnLabel}>Accept</Text>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.singleBtnCol}>
-                <Pressable
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-                    onEnd();
-                  }}
-                  style={({ pressed }) => [
-                    styles.bigCallBtn,
-                    { backgroundColor: DECLINE_BG, opacity: pressed ? 0.85 : 1 },
-                  ]}
-                >
-                  <Ionicons
-                    name="call"
-                    size={28}
-                    color={ON_PRIMARY}
-                    style={{ transform: [{ rotate: '135deg' }] }}
-                  />
-                </Pressable>
-                <Text style={styles.bigBtnLabel}>End call</Text>
-                {(isOutgoing || isConnecting) && (
-                  <Text style={styles.dialingText}>
-                    {isConnecting ? 'Connecting…' : 'Calling…'}
-                  </Text>
-                )}
-              </View>
-            )}
-          </View>
-        </SafeAreaView>
+              )}
+            </View>
+          </SafeAreaView>
+        </SafeAreaProvider>
       </View>
     </Modal>
   );
