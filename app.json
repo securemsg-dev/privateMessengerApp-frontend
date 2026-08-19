@@ -18,9 +18,10 @@
         "UIBackgroundModes": [
           "audio"
         ],
-        "NSCameraUsageDescription": "Cricchat uses the camera when you choose to take a photo or video inside a conversation to send to a contact, or to capture a new profile picture. For example, tap the camera icon in a chat to take and send a photo.",
-        "NSMicrophoneUsageDescription": "Cricchat uses the microphone when you record a voice message to send in a conversation, or during a voice or video call with a contact. For example, hold the microphone button in a chat to record and send a voice note.",
-        "NSPhotoLibraryUsageDescription": "Cricchat accesses your photo library only when you choose to attach an existing photo or video to send in a conversation, or to set your profile picture. For example, tap the attachment icon in a chat to pick a photo to send.",
+        "NSCameraUsageDescription": "Cricchat uses the camera when you take a photo or video to send in a conversation, or during a video call. For example, tap the camera icon in a chat to take and send a photo.",
+        "NSMicrophoneUsageDescription": "Cricchat uses the microphone when you record a voice message to send in a conversation, or during a voice or video call. For example, hold the microphone button in a chat to record and send a voice note.",
+        "NSPhotoLibraryUsageDescription": "Cricchat accesses your photo library when you choose an existing photo or video to send in a conversation, or to set your profile picture. For example, tap the attachment icon in a chat to pick a photo to send.",
+        "NSFaceIDUsageDescription": "Cricchat uses Face ID to unlock the app so only you can open your private conversations. For example, when you open Cricchat, Face ID confirms your identity before your chats are shown.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -50,27 +51,32 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Cricchat uses Face ID to unlock the app so only you can open your private conversations. For example, when you open Cricchat, Face ID confirms your identity before your chats are shown."
+        }
+      ],
       "expo-sqlite",
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Cricchat to access your photos.",
-          "cameraPermission": "Allow Cricchat to access your camera."
+          "photosPermission": "Cricchat accesses your photo library when you choose an existing photo or video to send in a conversation, or to set your profile picture. For example, tap the attachment icon in a chat to pick a photo to send.",
+          "cameraPermission": "Cricchat uses the camera when you take a photo or video to send in a conversation, or during a video call. For example, tap the camera icon in a chat to take and send a photo."
         }
       ],
       [
         "expo-av",
         {
-          "microphonePermission": "Allow Cricchat to access your microphone for voice messages."
+          "microphonePermission": "Cricchat uses the microphone when you record a voice message to send in a conversation, or during a voice or video call. For example, hold the microphone button in a chat to record and send a voice note."
         }
       ],
       "expo-notifications",
       [
         "@config-plugins/react-native-webrtc",
         {
-          "cameraPermission": "Allow Cricchat to use your camera for calls.",
-          "microphonePermission": "Allow Cricchat to use your microphone for calls."
+          "cameraPermission": "Cricchat uses the camera when you take a photo or video to send in a conversation, or during a video call. For example, tap the camera icon in a chat to take and send a photo.",
+          "microphonePermission": "Cricchat uses the microphone when you record a voice message to send in a conversation, or during a voice or video call. For example, hold the microphone button in a chat to record and send a voice note."
         }
       ],
       "./plugins/withCallForegroundService"
