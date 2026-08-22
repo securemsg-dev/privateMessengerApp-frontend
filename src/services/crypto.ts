@@ -150,6 +150,45 @@ export async function ensureKeyPairFor(ownerPrivateNumber: string): Promise<void
   await SecureStore.setItemAsync(KEY_OWNER_STORE, ownerPrivateNumber);
 }
 
+/**
+ * Mint a brand-new keypair for a just-registered account, replacing anything
+ * on the device. Returns the pair so the caller can wrap the secret key into
+ * the server-side backup. See services/keyRecovery.ts.
+ */
+export async function createFreshKeyPair(
+  ownerPrivateNumber: string,
+): Promise<{ publicKey: string; secretKey: string }> {
+  await clearKeyPair();
+  const fresh = nacl.box.keyPair();
+  const pair = {
+    publicKey: naclUtil.encodeBase64(fresh.publicKey),
+    secretKey: naclUtil.encodeBase64(fresh.secretKey),
+  };
+  await persistKeyPair(pair);
+  cachedKeyPair = pair;
+  await SecureStore.setItemAsync(KEY_OWNER_STORE, ownerPrivateNumber);
+  return pair;
+}
+
+/**
+ * Restore a keypair from a recovered secret key (unwrapped from the server
+ * backup on a new-device login). The public key is re-derived from the secret,
+ * so a new device recovers the SAME E2EE identity and can decrypt history.
+ */
+export async function restoreKeyPair(
+  secretKeyB64: string,
+  ownerPrivateNumber: string,
+): Promise<void> {
+  const derived = nacl.box.keyPair.fromSecretKey(naclUtil.decodeBase64(secretKeyB64));
+  const pair = {
+    publicKey: naclUtil.encodeBase64(derived.publicKey),
+    secretKey: secretKeyB64,
+  };
+  await persistKeyPair(pair);
+  cachedKeyPair = pair;
+  await SecureStore.setItemAsync(KEY_OWNER_STORE, ownerPrivateNumber);
+}
+
 // ── Encrypt / decrypt ────────────────────────────────────────────────────────
 
 /**

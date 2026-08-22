@@ -208,6 +208,9 @@ export interface LoginAuthenticatedResponse {
   action: 'authenticated';
   user: UserDTO;
   tokens: TokenPair;
+  /** Encrypted E2EE private-key backup to restore on this device. Null for
+   *  legacy accounts registered before key recovery. See keyRecovery.ts. */
+  encrypted_key_backup?: string | null;
 }
 
 export interface LoginDeleteIntentResponse {
@@ -220,10 +223,19 @@ export type LoginResponse = LoginAuthenticatedResponse | LoginDeleteIntentRespon
 
 // ── Auth endpoints ───────────────────────────────────────────────────────────
 
+/** Step 1 of registration — allocate a candidate private_number to use as the
+ *  KDF salt before deriving verifiers / wrapping the key backup. */
+export function registerBeginApi(): Promise<{ private_number: string }> {
+  return request<{ private_number: string }>('/auth/register/begin', { method: 'POST' });
+}
+
 export function registerApi(body: {
-  login_password: string;
-  delete_password: string;
+  private_number: string;
+  login_password: string; // client-derived auth verifier, not the raw password
+  delete_password: string; // client-derived auth verifier, not the raw password
   display_name?: string;
+  public_key?: string;
+  encrypted_key_backup?: string;
 }): Promise<RegisterResponse> {
   return request<RegisterResponse>('/auth/register', { method: 'POST', body });
 }
@@ -405,9 +417,10 @@ export async function uploadBlobBytesApi(uploadUrl: string, fileUri: string): Pr
  * Errors: 403 wrong current password, 400 invalid new password.
  */
 export function changePasswordApi(body: {
-  current_password: string;
-  new_password: string;
+  current_password: string; // client-derived verifier for the current password
+  new_password: string; // client-derived verifier for the new password
   refresh_token?: string;
+  encrypted_key_backup?: string; // key re-wrapped under the new password
 }): Promise<{ message: string }> {
   return requestWithRefresh('/users/me/password', {
     method: 'POST',

@@ -23,8 +23,11 @@ import { useTheme } from '../../theme/ThemeContext';
 import {
   ApiError,
   changePasswordApi,
+  CACHED_PRIVATE_NUMBER_KEY,
   REFRESH_TOKEN_KEY,
 } from '../../services/api';
+import { deriveKeyMaterial, wrapSecretKey } from '../../services/keyRecovery';
+import { getKeyPair } from '../../services/crypto';
 import * as SecureStore from '../../utils/secureStorage';
 
 const MIN_PASSWORD_LEN = 8;
@@ -34,6 +37,7 @@ export const ChangePasswordScreen = () => {
   const { t } = useTranslation();
   const navigation = useNavigation<any>();
   const refreshTokenFromStore = useSelector((s: RootState) => s.auth.refreshToken);
+  const privateNumberFromStore = useSelector((s: RootState) => s.auth.privateNumber);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -63,9 +67,20 @@ export const ChangePasswordScreen = () => {
       // server-side invalidation of all other sessions.
       const refreshToken =
         refreshTokenFromStore ?? (await SecureStore.getItemAsync(REFRESH_TOKEN_KEY));
+      const privateNumber =
+        privateNumberFromStore ??
+        (await SecureStore.getItemAsync(CACHED_PRIVATE_NUMBER_KEY)) ??
+        '';
+      // Derive verifiers for both passwords and re-wrap the SAME E2EE key under
+      // the new password's wrap key, so history still decrypts afterwards.
+      const currentMat = await deriveKeyMaterial(currentPassword, privateNumber);
+      const newMat = await deriveKeyMaterial(newPassword, privateNumber);
+      const keyPair = await getKeyPair();
+      const encryptedKeyBackup = wrapSecretKey(keyPair.secretKey, newMat.wrapKey);
       await changePasswordApi({
-        current_password: currentPassword,
-        new_password: newPassword,
+        current_password: currentMat.authVerifier,
+        new_password: newMat.authVerifier,
+        encrypted_key_backup: encryptedKeyBackup,
         ...(refreshToken ? { refresh_token: refreshToken } : {}),
       });
       Alert.alert(t('changePassword.successTitle'), t('changePassword.successBody'), [

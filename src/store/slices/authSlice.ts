@@ -19,6 +19,7 @@ import {
   getMeApi,
   loginApi,
   logoutApi,
+  registerBeginApi,
   PUSH_TOKEN_KEY,
   refreshApi,
   registerApi,
@@ -27,7 +28,8 @@ import {
   UserDTO,
 } from '../../services/api';
 import { wipeLocalData } from '../../services/database';
-import { clearKeyPair } from '../../services/crypto';
+import { clearKeyPair, createFreshKeyPair, restoreKeyPair, ensureKeyPairFor } from '../../services/crypto';
+import { deriveKeyMaterial, wrapSecretKey, unwrapSecretKey } from '../../services/keyRecovery';
 import { clearCache } from '../../services/cache';
 
 interface AuthState {
@@ -90,6 +92,31 @@ async function clearCachedPrivateNumber() {
   await SecureStore.deleteItemAsync(CACHED_PRIVATE_NUMBER_KEY);
 }
 
+/**
+ * After a successful login/unlock, restore the E2EE keypair from the server
+ * backup so this device decrypts history. Falls back to binding a fresh key
+ * (ensureKeyPairFor) when there's no backup (legacy account) or the unwrap
+ * fails — never leaves the device without a usable key.
+ */
+async function restoreKeyPairFromBackup(
+  backup: string | null | undefined,
+  wrapKey: Uint8Array,
+  privateNumber: string,
+): Promise<void> {
+  if (backup) {
+    const secretKey = unwrapSecretKey(backup, wrapKey);
+    if (secretKey) {
+      await restoreKeyPair(secretKey, privateNumber);
+      return;
+    }
+    // Auth succeeded but the backup didn't unwrap — inconsistent state (e.g.
+    // backup wrapped under a different password). Don't crash; bind a fresh
+    // key so messaging still works going forward.
+    console.warn('[auth] key backup present but failed to unwrap — binding fresh key');
+  }
+  await ensureKeyPairFor(privateNumber);
+}
+
 function errorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.detail || `HTTP ${err.status}`;
   if (err instanceof Error) return err.message;
@@ -113,18 +140,39 @@ export const registerThunk = createAsyncThunk<
   { rejectValue: string }
 >('auth/register', async ({ loginPassword, deletePassword, displayName }, { rejectWithValue }) => {
   try {
-    const resp = await registerApi({
-      login_password: loginPassword,
-      delete_password: deletePassword,
-      display_name: displayName,
-    });
-    await persistTokens(resp.tokens.access_token, resp.tokens.refresh_token);
-    await persistPrivateNumber(resp.user.private_number);
-    return {
-      user: resp.user,
-      accessToken: resp.tokens.access_token,
-      refreshToken: resp.tokens.refresh_token,
-    };
+    // Two-step registration: /begin allocates the private_number that becomes
+    // the KDF salt; we derive the auth verifiers + wrap key from it, mint a
+    // fresh E2EE keypair, wrap its secret key into the server-side backup, then
+    // /complete. Retry on 409 (candidate number taken between begin/complete).
+    for (let attempt = 0; ; attempt++) {
+      const { private_number } = await registerBeginApi();
+      const keyPair = await createFreshKeyPair(private_number);
+      const loginMat = await deriveKeyMaterial(loginPassword, private_number);
+      const deleteMat = await deriveKeyMaterial(deletePassword, private_number);
+      const encryptedKeyBackup = wrapSecretKey(keyPair.secretKey, loginMat.wrapKey);
+      try {
+        const resp = await registerApi({
+          private_number,
+          login_password: loginMat.authVerifier,
+          delete_password: deleteMat.authVerifier,
+          display_name: displayName,
+          public_key: keyPair.publicKey,
+          encrypted_key_backup: encryptedKeyBackup,
+        });
+        await persistTokens(resp.tokens.access_token, resp.tokens.refresh_token);
+        await persistPrivateNumber(resp.user.private_number);
+        return {
+          user: resp.user,
+          accessToken: resp.tokens.access_token,
+          refreshToken: resp.tokens.refresh_token,
+        };
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409 && attempt < 4) {
+          continue; // candidate number collided — get a fresh one and retry
+        }
+        throw err;
+      }
+    }
   } catch (err) {
     return rejectWithValue(errorMessage(err));
   }
@@ -145,9 +193,12 @@ export const loginThunk = createAsyncThunk<
   { rejectValue: string }
 >('auth/login', async ({ privateNumber, loginPassword }, { rejectWithValue }) => {
   try {
+    // Derive the verifier (sent to the server) and the wrap key (kept here) in
+    // one KDF pass. The server only ever sees the verifier.
+    const mat = await deriveKeyMaterial(loginPassword, privateNumber);
     const resp = await loginApi({
       private_number: privateNumber,
-      login_password: loginPassword,
+      login_password: mat.authVerifier,
     });
     if (resp.action === 'confirm_delete') {
       return {
@@ -156,6 +207,9 @@ export const loginThunk = createAsyncThunk<
         expiresIn: resp.expires_in,
       };
     }
+    // Restore the E2EE key from the server backup so this device can decrypt
+    // history. Unwrap uses the wrap key derived above — the server cannot.
+    await restoreKeyPairFromBackup(resp.encrypted_key_backup, mat.wrapKey, privateNumber);
     await persistTokens(resp.tokens.access_token, resp.tokens.refresh_token);
     await persistPrivateNumber(resp.user.private_number);
     return {
@@ -265,9 +319,10 @@ export const unlockAppThunk = createAsyncThunk<
     return rejectWithValue('No cached account — please sign in again');
   }
   try {
+    const mat = await deriveKeyMaterial(password, cachedPN);
     const resp = await loginApi({
       private_number: cachedPN,
-      login_password: password,
+      login_password: mat.authVerifier,
     });
     if (resp.action === 'confirm_delete') {
       // Duress password path — no dialog, wipe everything immediately.
@@ -283,6 +338,7 @@ export const unlockAppThunk = createAsyncThunk<
       await clearCache();
       return { kind: 'deleted' };
     }
+    await restoreKeyPairFromBackup(resp.encrypted_key_backup, mat.wrapKey, cachedPN);
     await persistTokens(resp.tokens.access_token, resp.tokens.refresh_token);
     await persistPrivateNumber(resp.user.private_number);
     return {
