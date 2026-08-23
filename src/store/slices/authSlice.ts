@@ -145,7 +145,7 @@ export const registerThunk = createAsyncThunk<
     // fresh E2EE keypair, wrap its secret key into the server-side backup, then
     // /complete. Retry on 409 (candidate number taken between begin/complete).
     for (let attempt = 0; ; attempt++) {
-      const { private_number } = await registerBeginApi();
+      const { private_number, registration_token } = await registerBeginApi();
       const keyPair = await createFreshKeyPair(private_number);
       const loginMat = await deriveKeyMaterial(loginPassword, private_number);
       const deleteMat = await deriveKeyMaterial(deletePassword, private_number);
@@ -153,6 +153,7 @@ export const registerThunk = createAsyncThunk<
       try {
         const resp = await registerApi({
           private_number,
+          registration_token,
           login_password: loginMat.authVerifier,
           delete_password: deleteMat.authVerifier,
           display_name: displayName,

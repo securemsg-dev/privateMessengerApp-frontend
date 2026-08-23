@@ -223,14 +223,19 @@ export type LoginResponse = LoginAuthenticatedResponse | LoginDeleteIntentRespon
 
 // ── Auth endpoints ───────────────────────────────────────────────────────────
 
-/** Step 1 of registration — allocate a candidate private_number to use as the
- *  KDF salt before deriving verifiers / wrapping the key backup. */
-export function registerBeginApi(): Promise<{ private_number: string }> {
-  return request<{ private_number: string }>('/auth/register/begin', { method: 'POST' });
+/** Step 1 of registration — allocate a candidate private_number (the KDF salt)
+ *  plus a signed token that /register requires back, proving the number was
+ *  server-issued. */
+export function registerBeginApi(): Promise<{ private_number: string; registration_token: string }> {
+  return request<{ private_number: string; registration_token: string }>(
+    '/auth/register/begin',
+    { method: 'POST' },
+  );
 }
 
 export function registerApi(body: {
   private_number: string;
+  registration_token: string; // signed token from /register/begin binding the number
   login_password: string; // client-derived auth verifier, not the raw password
   delete_password: string; // client-derived auth verifier, not the raw password
   display_name?: string;
