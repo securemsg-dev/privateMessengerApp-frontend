@@ -35,6 +35,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
+      "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
@@ -72,6 +73,7 @@
         }
       ],
       "expo-notifications",
+      "react-native-quick-crypto",
       [
         "@config-plugins/react-native-webrtc",
         {

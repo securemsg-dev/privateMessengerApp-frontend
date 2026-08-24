@@ -277,19 +277,18 @@ export const ChatScreen = () => {
           </>
         )}
 
-        {/* Android: spacer = full keyboard height (endCoordinates.height is
-            measured from the physical screen bottom under edge-to-edge, so it
-            already covers the nav-bar inset — it replaces bottomInset, never
-            adds to it). iOS: KAV padding owns the keyboard; the spacer only
-            covers the home indicator while the keyboard is closed. */}
+        {/* The keyboard itself is handled per-platform, never by this spacer:
+            iOS by the KAV `padding` above, Android by the window pan
+            (android.softwareKeyboardLayoutMode: "pan" in app.json). Under
+            SDK 54 edge-to-edge, keyboardDidShow's endCoordinates.height is
+            unreliable on Android — it can report 0, which collapsed the old
+            height-driven spacer and left the composer behind the keyboard.
+            So the spacer now only reserves the home-indicator / nav-bar inset
+            while the keyboard is closed, and collapses while it is open (the
+            keyboard already covers that area). */}
         <View
           style={{
-            height:
-              keyboardHeight > 0
-                ? Platform.OS === 'android'
-                  ? keyboardHeight
-                  : 0
-                : bottomInset,
+            height: keyboardHeight > 0 ? 0 : bottomInset,
             backgroundColor: colors.background,
           }}
         />

@@ -55,6 +55,78 @@ function deriveSalt(privateNumber: string): Uint8Array {
 }
 
 /**
+ * Run scrypt natively.
+ *
+ * WHY THIS MATTERS: the pure-JS scrypt in @noble/hashes takes ~50 ms under
+ * Node's JIT but 20–30 SECONDS on-device, because Hermes has no JIT and
+ * scrypt's inner Salsa20 loop is pure integer math. Every login, unlock,
+ * register and password change runs this, so the JS path is unusable in the
+ * app. react-native-quick-crypto runs the same RFC 7914 scrypt in C++ (~100 ms).
+ *
+ * Identical N/r/p/dkLen to the JS path, so derived material is byte-identical
+ * and accounts created either way stay compatible.
+ *
+ * Falls back to the JS implementation when the native module is unavailable
+ * (Jest/Node, web). Correctness is preserved; only speed suffers — and we warn
+ * loudly so a broken native link in a real build is visible rather than silent.
+ */
+let warnedAboutJsFallback = false;
+
+async function scryptDerive(
+  password: Uint8Array,
+  salt: Uint8Array,
+  dkLen: number,
+): Promise<Uint8Array> {
+  try {
+    // Required lazily: importing react-native-quick-crypto at module scope
+    // throws in plain-Node contexts (Jest) where the native module is absent.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const quickCrypto = require('react-native-quick-crypto');
+    if (typeof quickCrypto?.scrypt === 'function') {
+      return await new Promise<Uint8Array>((resolve, reject) => {
+        quickCrypto.scrypt(
+          password,
+          salt,
+          dkLen,
+          { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P },
+          (err: Error | null, derived?: { buffer: ArrayBufferLike; byteOffset: number; byteLength: number }) => {
+            if (err || !derived) {
+              reject(err ?? new Error('scrypt returned no key'));
+              return;
+            }
+            // Copy out of the native Buffer into a plain Uint8Array.
+            resolve(
+              new Uint8Array(
+                derived.buffer.slice(
+                  derived.byteOffset,
+                  derived.byteOffset + derived.byteLength,
+                ),
+              ),
+            );
+          },
+        );
+      });
+    }
+  } catch {
+    /* fall through to the JS implementation below */
+  }
+
+  if (!warnedAboutJsFallback) {
+    warnedAboutJsFallback = true;
+    console.warn(
+      '[keyRecovery] native scrypt unavailable — falling back to the pure-JS ' +
+        'implementation. Expect multi-second key derivation on device.',
+    );
+  }
+  return scryptAsync(password, salt, {
+    N: SCRYPT_N,
+    r: SCRYPT_R,
+    p: SCRYPT_P,
+    dkLen,
+  });
+}
+
+/**
  * Run the split KDF. Returns the server-facing auth verifier and the local
  * wrap key. `privateNumber` is the salt input, so it must match the value used
  * at registration (the 10-digit number).
@@ -64,12 +136,7 @@ export async function deriveKeyMaterial(
   privateNumber: string,
 ): Promise<KeyMaterial> {
   const salt = deriveSalt(privateNumber);
-  const master = await scryptAsync(utf8ToBytes(password), salt, {
-    N: SCRYPT_N,
-    r: SCRYPT_R,
-    p: SCRYPT_P,
-    dkLen: MASTER_LEN,
-  });
+  const master = await scryptDerive(utf8ToBytes(password), salt, MASTER_LEN);
   const authVerifier = bytesToHex(hkdf(sha256, master, salt, INFO_AUTH, 32));
   const wrapKey = hkdf(sha256, master, salt, INFO_WRAP, 32);
   return { authVerifier, wrapKey };
