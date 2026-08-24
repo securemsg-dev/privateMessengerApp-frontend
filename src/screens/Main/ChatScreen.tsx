@@ -2,7 +2,6 @@ import React, { useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
-  Platform,
   TextInput,
   View,
 } from 'react-native';
@@ -200,17 +199,17 @@ export const ChatScreen = () => {
         />
       </SafeAreaView>
 
-      {/* iOS: KAV `padding` tracks keyboardWillShow/Hide for smooth animated
-          avoidance (its bottom edge is the screen bottom, so no
-          keyboardVerticalOffset needed). Android (edge-to-edge, window never
-          resizes): RN's KAV recomputes padding from keyboardDidHide event
-          coordinates and can leave a stale gap after dismissal — so KAV is
-          disabled there (behavior undefined = plain View) and the spacer View
-          at the bottom, driven by useKeyboardHeight, is the sole mechanism. */}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      {/* `padding` on BOTH platforms: the KAV's bottom edge is the screen
+          bottom, so no keyboardVerticalOffset is needed. Android previously
+          disabled the KAV and hand-rolled a keyboardHeight-sized spacer, but
+          the two fought each other (that combination is what produced the
+          "stale gap after dismissal" the old comment described, and under
+          SDK 54 edge-to-edge the spacer collapsed entirely because
+          keyboardDidShow can report height 0 — leaving the composer behind the
+          keyboard). The spacer below is now inset-only, so the KAV owns
+          keyboard avoidance alone on both platforms and the header stays
+          pinned. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <MessageList
           messages={messages}
           senderId={senderId}
