@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
+  Platform,
   TextInput,
   View,
 } from 'react-native';
@@ -199,17 +200,26 @@ export const ChatScreen = () => {
         />
       </SafeAreaView>
 
-      {/* `padding` on BOTH platforms: the KAV's bottom edge is the screen
-          bottom, so no keyboardVerticalOffset is needed. Android previously
-          disabled the KAV and hand-rolled a keyboardHeight-sized spacer, but
-          the two fought each other (that combination is what produced the
-          "stale gap after dismissal" the old comment described, and under
-          SDK 54 edge-to-edge the spacer collapsed entirely because
-          keyboardDidShow can report height 0 — leaving the composer behind the
-          keyboard). The spacer below is now inset-only, so the KAV owns
-          keyboard avoidance alone on both platforms and the header stays
-          pinned. */}
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+      {/* iOS: KAV `padding` tracks keyboardWillShow/Hide for smooth animated
+          avoidance (its bottom edge is the screen bottom, so no
+          keyboardVerticalOffset needed).
+
+          Android: KAV is disabled and the OS handles avoidance via
+          android.softwareKeyboardLayoutMode: "pan" (app.json). Three
+          approaches were tried on SDK 54 edge-to-edge and only pan is usable:
+            • keyboardHeight-sized spacer → collapsed (keyboardDidShow can
+              report height 0 under edge-to-edge), composer hid behind the
+              keyboard;
+            • KAV behavior="padding" → correct on show, but left a large stale
+              gap after dismissal (device-confirmed twice);
+            • pan → composer always correct; cost is that the window shifts, so
+              the header scrolls off while typing.
+          Revisit with react-native-keyboard-controller (needs reanimated +
+          worklets + a babel plugin) when there's room to verify it properly. */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <MessageList
           messages={messages}
           senderId={senderId}
