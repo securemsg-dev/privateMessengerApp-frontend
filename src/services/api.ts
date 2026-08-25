@@ -114,12 +114,48 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const text = await resp.text();
   const data = text ? JSON.parse(text) : {};
   if (!resp.ok) {
-    const detail =
-      (data && (data.detail || data.message)) ||
-      `HTTP ${resp.status}`;
-    throw new ApiError(resp.status, String(detail));
+    const detail = formatErrorDetail(data, resp.status);
+    if (__DEV__) {
+      console.warn(`[API] ${method} ${path} → ${resp.status}`, text);
+    }
+    throw new ApiError(resp.status, detail);
   }
   return data as T;
+}
+
+/**
+ * Turn an error body into a human-readable string.
+ *
+ * FastAPI reports request-validation failures (422) as an ARRAY of objects:
+ *   {"detail": [{"type": "missing", "loc": ["body", "login_password"], ...}, ...]}
+ * The old code did String(detail) on that, which renders as
+ * "[object Object], [object Object]" — the signup-screen bug. Flatten the array
+ * into "field: message" lines instead, so the failing field is actually named.
+ * Also reads `error`, which is the key slowapi's rate-limit handler uses (429).
+ */
+function formatErrorDetail(data: unknown, status: number): string {
+  const body = data as Record<string, unknown> | null;
+  const detail = body?.detail ?? body?.message ?? body?.error;
+
+  if (typeof detail === 'string' && detail) return detail;
+
+  if (Array.isArray(detail)) {
+    const lines = detail
+      .map((entry) => {
+        if (typeof entry === 'string') return entry;
+        const e = entry as { loc?: unknown[]; msg?: string };
+        const field = Array.isArray(e.loc)
+          ? e.loc.filter((p) => p !== 'body' && p !== 'query').join('.')
+          : '';
+        const msg = e.msg ?? JSON.stringify(entry);
+        return field ? `${field}: ${msg}` : msg;
+      })
+      .filter(Boolean);
+    if (lines.length) return lines.join('\n');
+  }
+
+  if (detail && typeof detail === 'object') return JSON.stringify(detail);
+  return `HTTP ${status}`;
 }
 
 // ── Single-flight token refresh ─────────────────────────────────────────────
