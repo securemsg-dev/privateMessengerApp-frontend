@@ -32,6 +32,7 @@ import {
 } from '../services/api';
 import * as SecureStore from '../utils/secureStorage';
 import { userSocketBus } from '../services/userSocketBus';
+import { serverHasFeature } from '../services/serverFeatures';
 import { useCallSounds } from '../hooks/useCallSounds';
 import { beginLockSuppression, endLockSuppression } from '../utils/appLockGuard';
 import {
@@ -184,6 +185,22 @@ const CallContext = createContext<CallContextValue>({
 });
 
 // ─── Provider ──────────────────────────────────────────────────────────────────
+
+
+/** Report foreground/background on the user socket (presence). */
+function sendPresence(ws: WebSocket, appState: AppStateStatus): void {
+  if (ws.readyState !== WebSocket.OPEN || !serverHasFeature('presence')) return;
+  try {
+    ws.send(
+      JSON.stringify({
+        type: 'presence',
+        state: appState === 'background' ? 'background' : 'active',
+      }),
+    );
+  } catch {
+    /* socket closing — the next connect reports state again */
+  }
+}
 
 export const CallProvider = ({ children }: { children: ReactNode }) => {
   const isAuthenticated = useSelector((s: RootState) => s.auth.isAuthenticated);
@@ -445,6 +462,10 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
 
     ws.onopen = () => {
       console.log('[call] User WS connected');
+      // Presence: tell the server whether the app is actually in use (a
+      // fresh socket counts as active server-side; this corrects it when
+      // the socket reconnects while backgrounded).
+      sendPresence(ws, AppState.currentState);
       // Pre-warm the ICE/TURN config so the first call doesn't pay for the
       // fetch on the critical path. Failure is non-fatal (call setup refetches).
       void fetchIceServers().catch(() => {});
@@ -592,11 +613,19 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reconnect user WS when app comes to foreground
+  // Reconnect user WS when app comes to foreground; report foreground /
+  // background for presence ("Online" vs "Last seen …").
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
-      if (state === 'active' && isAuthenticated) {
-        void connectUserWs();
+      if (!isAuthenticated) return;
+      const ws = userWsRef.current;
+      if (state === 'active') {
+        if (ws?.readyState === WebSocket.OPEN) sendPresence(ws, state);
+        else void connectUserWs();
+      } else if (state === 'background') {
+        // 'inactive' (iOS control centre, app switcher peek) is ignored on
+        // purpose — it's momentary and shouldn't flip the user offline.
+        if (ws) sendPresence(ws, state);
       }
     });
     return () => sub.remove();

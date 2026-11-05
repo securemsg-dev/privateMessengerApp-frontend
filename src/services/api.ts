@@ -325,6 +325,8 @@ export interface UserPublicDTO {
   public_key: string | null;
   /** Blob UUID stored in the media system. Use buildAvatarUrl() to get the download URL. */
   profile_picture_key: string | null;
+  /** Only on GET/PATCH /users/me (newer backends): presence privacy toggle. */
+  show_online_status?: boolean;
 }
 
 export interface LastMessagePreviewDTO {
@@ -419,6 +421,8 @@ export function patchMeApi(body: {
   /** Empty string clears the bio (server stores NULL); omit to leave unchanged. */
   bio?: string;
   profile_picture_key?: string;
+  /** Presence privacy: false hides online / last seen from everyone. */
+  show_online_status?: boolean;
 }): Promise<UserPublicDTO> {
   return requestWithRefresh<UserPublicDTO>('/users/me', {
     method: 'PATCH',
@@ -810,7 +814,14 @@ export function buildWebSocketUrl(conversationId: string, token: string): string
   // Strip the trailing /api/v1 and swap http(s) → ws(s)
   const root = BASE_URL.replace(/\/api\/v1\/?$/, '');
   const wsRoot = root.replace(/^http/, 'ws');
-  return `${wsRoot}/ws/${conversationId}?token=${encodeURIComponent(token)}`;
+  // presence=1 opts this socket in to peer online/last-seen events; older
+  // backends ignore the unknown query parameter.
+  return `${wsRoot}/ws/${conversationId}?token=${encodeURIComponent(token)}&presence=1`;
+}
+
+/** GET /health lives at the server root (not under /api/v1). */
+export function buildHealthUrl(): string {
+  return `${BASE_URL.replace(/\/api\/v1\/?$/, '')}/health`;
 }
 
 /**

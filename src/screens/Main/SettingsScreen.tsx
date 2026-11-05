@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -28,6 +28,8 @@ import { deleteAccountThunk } from '../../store/slices/authSlice';
 import { useTheme } from '../../theme/ThemeContext';
 import { Avatar } from '../../components/Avatar';
 import { BottomSheet } from '../../components/BottomSheet';
+import { getMeApi, patchMeApi } from '../../services/api';
+import { serverHasFeature } from '../../services/serverFeatures';
 
 const LANGUAGES: { code: Language; label: string }[] = [
   { code: 'en', label: 'English' },
@@ -134,6 +136,29 @@ export const SettingsScreen = () => {
   const language = useSelector((s: RootState) => s.settings.language);
 
   const [languageSheetVisible, setLanguageSheetVisible] = useState(false);
+
+  // Presence privacy toggle — server-backed; null until loaded (row hidden
+  // on backends without presence support).
+  const [showOnline, setShowOnline] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!serverHasFeature('presence')) return;
+    let cancelled = false;
+    getMeApi()
+      .then((me) => {
+        if (!cancelled && typeof me.show_online_status === 'boolean') {
+          setShowOnline(me.show_online_status);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const toggleShowOnline = (next: boolean) => {
+    const prev = showOnline;
+    setShowOnline(next); // optimistic
+    patchMeApi({ show_online_status: next }).catch(() => setShowOnline(prev));
+  };
 
   const handleCopy = () => {
     if (!rawNum) return;
@@ -281,6 +306,23 @@ export const SettingsScreen = () => {
               />
             }
           />
+          {showOnline !== null && (
+            <Row
+              colors={colors}
+              icon="radio-button-on-outline"
+              label={t('settings.onlineStatus')}
+              subtitle={showOnline ? t('settings.onlineStatusOn') : t('settings.onlineStatusOff')}
+              onPress={() => toggleShowOnline(!showOnline)}
+              right={
+                <Switch
+                  value={showOnline}
+                  onValueChange={toggleShowOnline}
+                  trackColor={{ false: colors.border, true: colors.primary }}
+                  thumbColor="#fff"
+                />
+              }
+            />
+          )}
           <Row
             colors={colors}
             icon="lock-closed-outline"

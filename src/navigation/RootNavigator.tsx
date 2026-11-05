@@ -16,6 +16,7 @@ import { MainStack } from './MainStack';
 import { AppLockScreen } from '../screens/Auth/AppLockScreen';
 import { useTheme } from '../theme/ThemeContext';
 import { ensureKeyPairFor, getPublicKey } from '../services/crypto';
+import { loadServerFeatures } from '../services/serverFeatures';
 import { uploadPublicKeyApi } from '../services/api';
 import { getNotificationsEnabledFlag, registerPushToken } from '../services/push';
 import { loadSettingsThunk } from '../store/slices/settingsSlice';
@@ -72,6 +73,12 @@ export const RootNavigator = () => {
     dispatch(loadSettingsThunk());
     dispatch(rehydrateThunk()).finally(() => setIsInitializing(false));
   }, [dispatch]);
+
+  // Learn which features this backend supports (presence, video, groups…)
+  // so the app never sends something an older server wouldn't understand.
+  useEffect(() => {
+    if (isAuthenticated) void loadServerFeatures();
+  }, [isAuthenticated]);
 
   // Phase B — once the user is authenticated and the app is unlocked, ensure
   // their long-term E2EE public key is registered on the server. Lazy-generates

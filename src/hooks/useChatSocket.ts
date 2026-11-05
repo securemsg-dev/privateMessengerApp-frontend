@@ -6,6 +6,7 @@ import {
   markMessageDeletedForEveryone,
   mediaPlaceholder,
   Message,
+  setPeerPresence,
   updateMessageStatus,
   upsertMessage,
 } from '../store/slices/chatSlice';
@@ -101,6 +102,18 @@ export function useChatSocket(
             hydrateMediaFor(incoming.id, envelope);
           }
         })();
+        return;
+      }
+      if (event.type === 'presence') {
+        // Our own presence echoes through the same channel — ignore it.
+        if (event.user_id === senderIdRef.current) return;
+        dispatch(
+          setPeerPresence({
+            userId: event.user_id,
+            online: event.online,
+            lastSeen: event.last_seen,
+          }),
+        );
         return;
       }
       if (event.type === 'delivery' || event.type === 'read') {

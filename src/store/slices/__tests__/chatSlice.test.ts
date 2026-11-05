@@ -4,6 +4,10 @@
  */
 import reducer, {
   applyReactionEvent,
+  clearActiveMessages,
+  mediaMetaOf,
+  setActiveConversation,
+  setPeerPresence,
   markMessageDeletedForEveryone,
   Message,
   removeMessage,
@@ -164,5 +168,39 @@ describe('star / delete', () => {
     expect(tomb.reactions).toHaveLength(0);
     expect(tomb.replyPreview).toBeNull();
     expect(tomb.mediaUri).toBeUndefined();
+  });
+});
+
+
+describe('peer presence', () => {
+  const online = { userId: 'peer', online: true, lastSeen: null };
+
+  it('stores presence for the open chat', () => {
+    const s = reducer(undefined, setPeerPresence(online));
+    expect(s.peerPresence).toEqual(online);
+  });
+
+  it('clears when the thread is reset or another chat is opened', () => {
+    let s = reducer(undefined, setActiveConversation('c1'));
+    s = reducer(s, setPeerPresence(online));
+    expect(reducer(s, clearActiveMessages()).peerPresence).toBeNull();
+    expect(reducer(s, setActiveConversation('c2')).peerPresence).toBeNull();
+    // Re-dispatching the same conversation keeps it.
+    expect(reducer(s, setActiveConversation('c1')).peerPresence).toEqual(online);
+  });
+});
+
+describe('mediaMetaOf', () => {
+  it('prefers locally-known meta over the envelope', () => {
+    const m = makeMessage({
+      type: 'voice',
+      mediaEnvelope: {
+        kind: 'media', blobId: 'b', downloadUrl: 'u', key: 'k', nonce: 'n',
+        mime: 'audio/aac', sizeBytes: 1, durationMs: 1000,
+      },
+      mediaMeta: { durationMs: 2000, waveform: [1, 2] },
+    });
+    expect(mediaMetaOf(m)).toMatchObject({ durationMs: 2000, waveform: [1, 2] });
+    expect(mediaMetaOf(makeMessage())).toEqual({});
   });
 });

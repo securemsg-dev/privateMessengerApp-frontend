@@ -19,6 +19,7 @@ import {
 } from '../../services/crypto';
 import { cacheGet, cacheSet, CACHE_KEYS } from '../../services/cache';
 import { voicePreviewText } from '../../utils/waveform';
+import type { PeerPresence } from '../../utils/presence';
 
 /* ── Types ─────────────────────────────────────────────── */
 
@@ -105,6 +106,8 @@ export function mediaMetaOf(m: Pick<Message, 'mediaEnvelope' | 'mediaMeta'>): Me
 interface ChatState {
   conversations: Conversation[];
   activeMessages: Message[];
+  /** Online / last seen of the open 1:1 chat's peer; null until known. */
+  peerPresence: PeerPresence | null;
   status: 'idle' | 'loading';
   /** Conversation the user is currently viewing (ChatScreen open). Drives
    *  whether an incoming message_notification bumps the unread counter. */
@@ -120,6 +123,7 @@ interface ChatState {
 const initialState: ChatState = {
   conversations: [],
   activeMessages: [],
+  peerPresence: null,
   status: 'idle',
   activeConversationId: null,
   messagesCursor: null,
@@ -503,6 +507,12 @@ const chatSlice = createSlice({
       state.activeMessages = [];
       state.messagesCursor = null;
       state.loadingOlder = false;
+      state.peerPresence = null;
+    },
+
+    /** Live presence for the open chat's peer (from the conversation socket). */
+    setPeerPresence(state, action: PayloadAction<PeerPresence | null>) {
+      state.peerPresence = action.payload;
     },
 
     /**
@@ -567,6 +577,7 @@ const chatSlice = createSlice({
 
     /** Track which conversation is on-screen (set by ChatScreen on focus). */
     setActiveConversation(state, action: PayloadAction<string | null>) {
+      if (state.activeConversationId !== action.payload) state.peerPresence = null;
       state.activeConversationId = action.payload;
     },
 
@@ -777,6 +788,7 @@ const chatSlice = createSlice({
 
 export const {
   clearActiveMessages,
+  setPeerPresence,
   upsertMessage,
   updateMessageStatus,
   mergeConversation,

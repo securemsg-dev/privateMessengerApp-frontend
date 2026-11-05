@@ -3,6 +3,7 @@ import { Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { styles } from './styles';
 import { Avatar } from '../../../components/Avatar';
+import { formatPresence, PeerPresence } from '../../../utils/presence';
 
 interface Colors {
   text: string;
@@ -24,7 +25,11 @@ interface Props {
   onCallLongPress: () => void;
   /** Opens the ⋮ menu (block / report). Omitted for self-chat. */
   onOverflow?: () => void;
+  /** Peer online / last seen; null hides the status entirely. */
+  presence?: PeerPresence | null;
 }
+
+const ONLINE_GREEN = '#22a55b';
 
 const formatPrivateNumber = (n: string) => {
   if (!n || n.length !== 10) return '';
@@ -42,7 +47,11 @@ export const ChatHeader = ({
   onCall,
   onCallLongPress,
   onOverflow,
-}: Props) => (
+  presence,
+}: Props) => {
+  const presenceText = formatPresence(presence);
+  const online = !!presence?.online;
+  return (
   <View style={[styles.header, { borderBottomColor: colors.border }]}>
     <TouchableOpacity onPress={onBack} style={styles.backBtn}>
       <Ionicons name="chevron-back" size={26} color={colors.text} />
@@ -61,11 +70,21 @@ export const ChatHeader = ({
       <View style={styles.headerSubRow}>
         {!isSelfChat && contactPrivateNumber.length === 10 && (
           <>
-            <View style={[styles.presenceDot, { backgroundColor: colors.primary }]} />
+            {online && (
+              <View style={[styles.presenceDot, { backgroundColor: ONLINE_GREEN }]} />
+            )}
             <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1}>
               {formatPrivateNumber(contactPrivateNumber)}
-              {'  ·  '}
-              <Text style={{ color: colors.primary, fontWeight: '600' }}>ACTIVE NOW</Text>
+              {presenceText ? '  ·  ' : ''}
+              {presenceText ? (
+                <Text
+                  style={
+                    online ? { color: ONLINE_GREEN, fontWeight: '600' } : undefined
+                  }
+                >
+                  {presenceText}
+                </Text>
+              ) : null}
             </Text>
           </>
         )}
@@ -99,4 +118,5 @@ export const ChatHeader = ({
       </TouchableOpacity>
     )}
   </View>
-);
+  );
+};

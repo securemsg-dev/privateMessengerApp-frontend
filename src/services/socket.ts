@@ -28,7 +28,7 @@ export interface ServerMessageEvent {
   message_id: string;
   client_temp_id?: string | null;
   encrypted_payload: string;
-  message_type: 'text' | 'voice' | 'image' | 'document';
+  message_type: 'text' | 'voice' | 'image' | 'document' | 'video' | 'system';
   self_destruct: boolean;
   reply_to_id?: string | null;
   timestamp: string;
@@ -68,12 +68,22 @@ export interface ServerErrorEvent {
   detail: string;
 }
 
+/** Peer online / last seen (only sent to sockets opened with presence=1). */
+export interface ServerPresenceEvent {
+  type: 'presence';
+  user_id: string;
+  online: boolean;
+  /** ISO timestamp; null when unknown or the peer hides their status. */
+  last_seen: string | null;
+}
+
 export type ServerEvent =
   | ServerMessageEvent
   | ServerReceiptEvent
   | ServerReactionEvent
   | ServerDeletionEvent
-  | ServerErrorEvent;
+  | ServerErrorEvent
+  | ServerPresenceEvent;
 
 // ── Wire types — client → server ─────────────────────────────────────────────
 

@@ -88,6 +88,7 @@ export const ChatScreen = () => {
   const messages = useSelector((s: RootState) => s.chat.activeMessages);
   const messagesCursor = useSelector((s: RootState) => s.chat.messagesCursor);
   const loadingOlder = useSelector((s: RootState) => s.chat.loadingOlder);
+  const peerPresence = useSelector((s: RootState) => s.chat.peerPresence);
   // Peer avatar comes from the cached conversation (no need to thread through
   // navigation params); falls back to initials when the chat isn't listed yet.
   const conv = useSelector((s: RootState) =>
@@ -242,6 +243,7 @@ export const ChatScreen = () => {
           onCall={handleCallPress}
           onCallLongPress={() => { /* reserved */ }}
           onOverflow={() => safety.setMenuOpen(true)}
+          presence={peerPresence}
         />
       </SafeAreaView>
 
