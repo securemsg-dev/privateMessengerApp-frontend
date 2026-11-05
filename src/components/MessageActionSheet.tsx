@@ -38,6 +38,8 @@ interface Props {
   onStar: () => void;
   onDelete: () => void;
   onReact: (emoji: string) => void;
+  /** "+" at the end of the strip — opens the full emoji picker for this message. */
+  onMoreReactions: () => void;
 }
 
 interface MenuItemProps {
@@ -60,6 +62,7 @@ export const MessageActionSheet = ({
   onStar,
   onDelete,
   onReact,
+  onMoreReactions,
 }: Props) => {
   const { colors } = useTheme();
   const opacity = useRef(new Animated.Value(0)).current;
@@ -227,6 +230,24 @@ export const MessageActionSheet = ({
               <Text style={styles.reactionEmoji}>{emoji}</Text>
             </Pressable>
           ))}
+          <Pressable
+            accessibilityLabel="More reactions"
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              // Dismiss first: iOS can't present the picker Modal on top of
+              // this sheet's Modal. The parent opens the picker afterwards.
+              onDismiss();
+              onMoreReactions();
+            }}
+            style={({ pressed }) => [
+              styles.reactionItem,
+              styles.reactionMore,
+              { backgroundColor: pressed ? colors.border : colors.surface },
+            ]}
+            hitSlop={6}
+          >
+            <Ionicons name="add" size={22} color={colors.textSecondary} />
+          </Pressable>
         </Animated.View>
 
         {/* Lifted bubble clone */}
@@ -316,6 +337,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   reactionEmoji: { fontSize: 22 },
+  reactionMore: { marginLeft: 2 },
 
   /* Bubble clone */
   cloneBubble: {

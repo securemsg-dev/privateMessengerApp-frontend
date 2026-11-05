@@ -2,8 +2,10 @@ import React, { useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
+  NativeSyntheticEvent,
   Platform,
   TextInput,
+  TextInputSelectionChangeEventData,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +29,9 @@ import { MessageActionSheet } from '../../components/MessageActionSheet';
 import { ForwardSheet } from '../../components/ForwardSheet';
 import { ChatOverflowMenu } from '../../components/ChatOverflowMenu';
 import { ReportSheet } from '../../components/ReportSheet';
+import { EmojiPickerSheet } from '../../components/EmojiPickerSheet';
+import { Message } from '../../store/slices/chatSlice';
+import { insertAtSelection, Selection } from '../../utils/textInsert';
 import { useCall } from '../../components/CallProvider';
 
 import { usePeerKeyLookup } from '../../hooks/usePeerKeyLookup';
@@ -107,6 +112,24 @@ export const ChatScreen = () => {
 
   const textInputRef = useRef<TextInput>(null);
 
+  // Emoji picker: either inserting into the composer, or reacting to a
+  // specific message (opened from the "+" in the long-press reaction strip).
+  const [emojiTarget, setEmojiTarget] = useState<
+    null | { kind: 'composer' } | { kind: 'reaction'; message: Message }
+  >(null);
+  const selectionRef = useRef<Selection | null>(null);
+  const handleSelectionChange = (
+    e: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
+  ) => {
+    selectionRef.current = e.nativeEvent.selection;
+  };
+  const openComposerEmoji = () => {
+    Haptics.selectionAsync().catch(() => {});
+    Keyboard.dismiss();
+    closeTray();
+    setEmojiTarget({ kind: 'composer' });
+  };
+
   // Hooks — dependency order matches plan phases 1-3
   const { peerPublicKey, peerPublicKeyRef } = usePeerKeyLookup(
     contactPrivateNumber, isSelfChat, initialPeerKey,
@@ -128,6 +151,20 @@ export const ChatScreen = () => {
     conversationId, senderId, contactPrivateNumber, isSelfChat,
     socketRef, peerPublicKeyRef, dispatch, replyTo, dismissReply, messages,
   );
+  // Ref mirror so several quick picks in a row each build on the latest text
+  // (the picker stays open between picks; a render may not have landed yet).
+  const textRef = useRef(text);
+  textRef.current = text;
+  const handleEmojiPicked = (emoji: string) => {
+    if (emojiTarget?.kind === 'reaction') {
+      actions.handleReact(emojiTarget.message, emoji);
+      return;
+    }
+    const next = insertAtSelection(textRef.current, selectionRef.current, emoji, 4000);
+    textRef.current = next.text;
+    selectionRef.current = { start: next.cursor, end: next.cursor };
+    setText(next.text);
+  };
   const { handlePickFromGallery, handleCamera, handlePickFile } = useMediaPicker(
     sendMediaAsset, closeTray,
   );
@@ -274,6 +311,8 @@ export const ChatScreen = () => {
                 closeTray={closeTray}
                 handleCamera={handleCamera}
                 togglePlus={togglePlus}
+                onEmojiPress={openComposerEmoji}
+                onSelectionChange={handleSelectionChange}
               />
             )}
             <AttachmentTray
@@ -316,6 +355,20 @@ export const ChatScreen = () => {
         onStar={() => actions.actionSheet && actions.handleStar(actions.actionSheet.message)}
         onDelete={() => actions.actionSheet && actions.handleDelete(actions.actionSheet.message)}
         onReact={(e) => actions.actionSheet && actions.handleReact(actions.actionSheet.message, e)}
+        onMoreReactions={() => {
+          const target = actions.actionSheet?.message;
+          if (!target) return;
+          // Let the action-sheet Modal finish dismissing before presenting
+          // the picker — iOS drops a Modal presented mid-dismiss.
+          setTimeout(() => setEmojiTarget({ kind: 'reaction', message: target }), 300);
+        }}
+      />
+
+      <EmojiPickerSheet
+        open={emojiTarget !== null}
+        multiple={emojiTarget?.kind === 'composer'}
+        onClose={() => setEmojiTarget(null)}
+        onPick={handleEmojiPicked}
       />
 
       <ForwardSheet

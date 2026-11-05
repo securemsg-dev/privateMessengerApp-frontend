@@ -1,7 +1,12 @@
 import React, { RefObject } from 'react';
-import { Keyboard, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  NativeSyntheticEvent,
+  TextInput,
+  TextInputSelectionChangeEventData,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
 import { ON_PRIMARY, styles } from './styles';
 
 interface Colors {
@@ -25,6 +30,10 @@ interface Props {
   closeTray: () => void;
   handleCamera: () => Promise<void>;
   togglePlus: () => void;
+  /** Opens the emoji picker sheet. */
+  onEmojiPress: () => void;
+  /** Cursor tracking so picked emoji land where the user was typing. */
+  onSelectionChange: (e: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => void;
 }
 
 export const ChatComposer = ({
@@ -39,6 +48,8 @@ export const ChatComposer = ({
   closeTray,
   handleCamera,
   togglePlus,
+  onEmojiPress,
+  onSelectionChange,
 }: Props) => (
   <View
     style={[
@@ -53,7 +64,7 @@ export const ChatComposer = ({
       ]}
     >
       <TouchableOpacity
-        onPress={() => textInputRef.current?.focus()}
+        onPress={onEmojiPress}
         style={styles.inlineBtnLeft}
         activeOpacity={0.7}
       >
@@ -66,6 +77,7 @@ export const ChatComposer = ({
         placeholderTextColor={colors.textSecondary}
         value={text}
         onChangeText={setText}
+        onSelectionChange={onSelectionChange}
         multiline
         maxLength={4000}
         onSubmitEditing={handleSend}
