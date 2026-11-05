@@ -581,6 +581,13 @@ export interface MediaUploadReservation {
   download_url: string;
   expires_at: string;
   max_bytes: number;
+  /**
+   * Newer backends: "direct" = PUT to the presigned bucket URL with exactly
+   * `upload_headers` and NO Authorization header, then call
+   * completeMediaUploadApi. "api"/absent = PUT through the app with auth.
+   */
+  upload_method?: 'api' | 'direct';
+  upload_headers?: Record<string, string>;
 }
 
 /**
@@ -590,12 +597,39 @@ export interface MediaUploadReservation {
 export function requestMediaUploadApi(body: {
   size_bytes: number;
   mime: string;
+  /** Ask for a presigned direct upload; the server decides (upload_method). */
+  direct?: boolean;
 }): Promise<MediaUploadReservation> {
   return requestWithRefresh<MediaUploadReservation>('/media/upload-url', {
     method: 'POST',
     auth: true,
     body,
   });
+}
+
+/** POST /media/{id}/complete — confirm a direct upload (server checks size). */
+export function completeMediaUploadApi(blobId: string): Promise<void> {
+  return requestWithRefresh<void>(`/media/${blobId}/complete`, {
+    method: 'POST',
+    auth: true,
+  });
+}
+
+export interface MediaDownloadUrlDTO {
+  url: string;
+  /** true → send the Bearer token; false → presigned URL, send NO auth header. */
+  auth: boolean;
+  expires_at?: string | null;
+}
+
+/** POST /media/download-urls — where to fetch each blob (≤100 per call). */
+export function resolveMediaUrlsApi(
+  blobIds: string[],
+): Promise<{ urls: Record<string, MediaDownloadUrlDTO> }> {
+  return requestWithRefresh<{ urls: Record<string, MediaDownloadUrlDTO> }>(
+    '/media/download-urls',
+    { method: 'POST', auth: true, body: { blob_ids: blobIds } },
+  );
 }
 
 export type DeleteScope = 'me' | 'everyone';

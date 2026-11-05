@@ -15,6 +15,7 @@ import * as Haptics from 'expo-haptics';
 import { useTheme } from '../theme/ThemeContext';
 import { Message, mediaMetaOf } from '../store/slices/chatSlice';
 import { voicePreviewText } from '../utils/waveform';
+import { bubbleSize } from '../utils/mediaSize';
 
 export const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const ON_PRIMARY = '#ffffff';
@@ -115,23 +116,25 @@ export const MessageActionSheet = ({
   const isMedia = message.type === 'image' || message.type === 'video';
 
   const renderClone = () => {
+    const meta = mediaMetaOf(message);
+    const size = bubbleSize(meta.w, meta.h, rect.width - 8);
     if (message.type === 'image' && message.mediaUri) {
       return (
-        <Image
-          source={{ uri: message.mediaUri }}
-          style={[styles.cloneMedia, { width: rect.width - 8, height: (rect.width - 8) * 0.75 }]}
-          resizeMode="cover"
-        />
+        <Image source={{ uri: message.mediaUri }} style={[styles.cloneMedia, size]} resizeMode="cover" />
       );
     }
-    if (message.type === 'video' && message.mediaUri) {
+    if (message.type === 'video') {
       return (
         <View>
-          <Image
-            source={{ uri: message.mediaUri }}
-            style={[styles.cloneMedia, { width: rect.width - 8, height: (rect.width - 8) * 0.75 }]}
-            resizeMode="cover"
-          />
+          {meta.poster ? (
+            <Image
+              source={{ uri: `data:image/jpeg;base64,${meta.poster}` }}
+              style={[styles.cloneMedia, size]}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={[styles.cloneMedia, size, { backgroundColor: '#1c1c1e' }]} />
+          )}
           <View style={styles.cloneVideoOverlay}>
             <Ionicons name="play-circle" size={36} color="rgba(255,255,255,0.9)" />
           </View>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import type { MessageType } from '../store/slices/chatSlice';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../theme/ThemeContext';
@@ -7,7 +8,7 @@ import { useTheme } from '../theme/ThemeContext';
 export interface ReplyContext {
   senderName: string;
   preview: string;
-  type: 'text' | 'image' | 'video' | 'voice' | 'document';
+  type: MessageType;
   mediaUri?: string;
 }
 

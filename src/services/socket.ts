@@ -90,7 +90,7 @@ export type ServerEvent =
 export interface ClientMessageEvent {
   type: 'message';
   encrypted_payload: string;
-  message_type: 'text' | 'voice' | 'image' | 'document';
+  message_type: 'text' | 'voice' | 'image' | 'document' | 'video';
   self_destruct?: boolean;
   client_temp_id?: string;
   reply_to_id?: string;

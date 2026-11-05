@@ -23,7 +23,20 @@ import type { PeerPresence } from '../../utils/presence';
 
 /* ── Types ─────────────────────────────────────────────── */
 
-export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'document';
+export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'document' | 'system';
+
+/**
+ * Display type for a received message. Older app builds sent videos with wire
+ * type 'image' (the backend had no 'video' type); the envelope's mime tells
+ * the truth.
+ */
+export function effectiveType(
+  wireType: string,
+  envelope: Pick<MediaEnvelope, 'mime'> | null | undefined,
+): MessageType {
+  if (wireType === 'image' && envelope?.mime.startsWith('video/')) return 'video';
+  return wireType as MessageType;
+}
 
 export interface Conversation {
   id: string;
@@ -275,7 +288,7 @@ async function decryptServerMessage(
     replyPreview = {
       id: m.reply_preview.id,
       senderId: m.reply_preview.sender_id,
-      type: m.reply_preview.message_type as MessageType,
+      type: effectiveType(m.reply_preview.message_type, previewEnvelope),
       content: previewEnvelope
         ? mediaPlaceholder(previewEnvelope.mime)
         : previewContent,
@@ -287,7 +300,7 @@ async function decryptServerMessage(
     senderId: m.sender_id,
     receiverId: '',
     content,
-    type: m.message_type as MessageType,
+    type: effectiveType(m.message_type, envelope),
     mediaUri: undefined,
     timestamp: m.created_at,
     status: m.read_at ? 'read' : m.delivered_at ? 'delivered' : 'sent',

@@ -31,7 +31,8 @@ import { ChatOverflowMenu } from '../../components/ChatOverflowMenu';
 import { ReportSheet } from '../../components/ReportSheet';
 import { EmojiPickerSheet } from '../../components/EmojiPickerSheet';
 import { MediaViewerModal, MediaViewerItem } from '../../components/MediaViewerModal';
-import { Message } from '../../store/slices/chatSlice';
+import { hydrateMessageMedia, mediaMetaOf, Message } from '../../store/slices/chatSlice';
+import { downloadAndDecryptMedia } from '../../services/media';
 import { insertAtSelection, Selection } from '../../utils/textInsert';
 import { useCall } from '../../components/CallProvider';
 
@@ -124,13 +125,35 @@ export const ChatScreen = () => {
   // Full-screen media viewer (tap on an image bubble).
   const [viewerItem, setViewerItem] = useState<MediaViewerItem | null>(null);
   const handleOpenMedia = (m: Message) => {
-    if (!m.mediaUri) return;
-    setViewerItem({
-      uri: m.mediaUri,
+    const base = {
+      key: m.id,
       title: m.senderId === senderId ? 'You' : contactName,
       timestamp: m.timestamp,
       mime: m.mediaEnvelope?.mime,
-    });
+    };
+    if (m.type !== 'video') {
+      if (m.mediaUri) setViewerItem({ ...base, kind: 'image', uri: m.mediaUri });
+      return;
+    }
+    const poster = mediaMetaOf(m).poster;
+    const posterUri = poster ? `data:image/jpeg;base64,${poster}` : undefined;
+    if (m.mediaUri) {
+      setViewerItem({ ...base, kind: 'video', uri: m.mediaUri, posterUri });
+      return;
+    }
+    if (!m.mediaEnvelope) return;
+    // Videos aren't auto-downloaded — fetch + decrypt now, poster meanwhile.
+    setViewerItem({ ...base, kind: 'video', posterUri });
+    downloadAndDecryptMedia(m.mediaEnvelope)
+      .then((localUri) => {
+        dispatch(hydrateMessageMedia({ messageId: m.id, localUri }));
+        setViewerItem((cur) => (cur?.key === m.id ? { ...cur, uri: localUri } : cur));
+      })
+      .catch(() => {
+        setViewerItem((cur) =>
+          cur?.key === m.id ? { ...cur, error: 'Could not load this video. Try again later.' } : cur,
+        );
+      });
   };
   const handleSelectionChange = (
     e: NativeSyntheticEvent<TextInputSelectionChangeEventData>,

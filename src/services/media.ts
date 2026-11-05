@@ -35,8 +35,12 @@ import * as SecureStore from '../utils/secureStorage';
 import {
   TOKEN_KEY,
   buildAvatarUrl,
+  completeMediaUploadApi,
+  MediaDownloadUrlDTO,
   requestMediaUploadApi,
+  resolveMediaUrlsApi,
 } from './api';
+import { serverHasFeature } from './serverFeatures';
 import {
   decryptBytes,
   encryptBytes,
@@ -103,11 +107,14 @@ export async function uploadEncryptedMedia(
   const { key, nonce } = makeMediaKey();
   const cipher = encryptBytes(plain, key, nonce);
 
-  // 2. Reserve a blob_id with the backend
+  // 2. Reserve a blob_id with the backend. We ask for a direct (presigned)
+  // bucket upload; the server decides and says so in `upload_method`.
   const reservation = await requestMediaUploadApi({
     size_bytes: cipher.length,
     mime,
+    direct: true,
   });
+  const direct = reservation.upload_method === 'direct';
 
   // 3. PUT the ciphertext bytes.
   //
@@ -124,14 +131,21 @@ export async function uploadEncryptedMedia(
     const result = await FileSystem.uploadAsync(reservation.upload_url, tmpUri, {
       httpMethod: 'PUT',
       uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      // Direct: exactly the signed headers and NO Authorization header (the
+      // bucket rejects a request carrying two auth mechanisms).
+      headers: direct
+        ? { 'Content-Type': 'application/octet-stream', ...(reservation.upload_headers ?? {}) }
+        : {
+            'Content-Type': 'application/octet-stream',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
     });
     if (result.status >= 400) {
       throw new Error(`Media upload failed (${result.status}): ${result.body}`);
     }
+    // The server must verify the stored size before any message may
+    // reference this blob (the WS send path requires it).
+    if (direct) await completeMediaUploadApi(reservation.blob_id);
   } finally {
     await FileSystem.deleteAsync(tmpUri, { idempotent: true }).catch(() => {});
   }
@@ -193,6 +207,56 @@ export async function downloadAvatar(blobId: string): Promise<string> {
 // a forwarded image) only download + decrypt once.
 const downloadInFlight = new Map<string, Promise<string>>();
 
+// ── Download URL resolution (presigned bucket URLs) ─────────────────────────
+//
+// The envelope's downloadUrl is the app's own GET /media/{id} (kept forever
+// for old builds). Newer backends can hand out presigned bucket URLs instead,
+// so media streams straight from storage. One batched call per chat page.
+
+interface ResolvedUrl {
+  url: string;
+  auth: boolean;
+  /** epoch ms; Infinity for app-served URLs. */
+  expiresAt: number;
+}
+const resolvedUrls = new Map<string, ResolvedUrl>();
+const URL_SAFETY_MARGIN_MS = 60_000;
+const RESOLVE_BATCH = 100;
+
+function freshResolved(blobId: string): ResolvedUrl | undefined {
+  const r = resolvedUrls.get(blobId);
+  if (r && r.expiresAt - URL_SAFETY_MARGIN_MS > Date.now()) return r;
+  return undefined;
+}
+
+function remember(blobId: string, dto: MediaDownloadUrlDTO): void {
+  const exp = dto.expires_at ? Date.parse(dto.expires_at) : NaN;
+  resolvedUrls.set(blobId, {
+    url: dto.url,
+    auth: dto.auth,
+    expiresAt: Number.isFinite(exp) ? exp : Infinity,
+  });
+}
+
+/**
+ * Resolve download URLs for many blobs at once (skips ones already cached).
+ * Best-effort: on failure, downloads fall back to the envelope URL.
+ */
+export async function prefetchMediaUrls(blobIds: string[]): Promise<void> {
+  if (!serverHasFeature('media_urls')) return;
+  const missing = Array.from(new Set(blobIds)).filter((id) => !freshResolved(id));
+  for (let i = 0; i < missing.length; i += RESOLVE_BATCH) {
+    const batch = missing.slice(i, i + RESOLVE_BATCH);
+    try {
+      const { urls } = await resolveMediaUrlsApi(batch);
+      for (const [id, dto] of Object.entries(urls)) remember(id, dto);
+    } catch (err) {
+      if (__DEV__) console.warn('[media] URL batch resolve failed; using app URLs:', err);
+      return;
+    }
+  }
+}
+
 function extensionFor(mime: string): string {
   // Just enough to make players + image viewers happy. Default is .bin so
   // unknown types still download cleanly.
@@ -229,12 +293,22 @@ export async function downloadAndDecryptMedia(
       return targetUri;
     }
 
-    // Download ciphertext to a temp path
+    // Download ciphertext to a temp path — from the bucket (presigned, no
+    // auth header) when resolved, else through the app with the token.
     const token = await SecureStore.getItemAsync(TOKEN_KEY);
     const tmpUri = `${dir}${envelope.blobId}.cipher`;
-    const dl = await FileSystem.downloadAsync(envelope.downloadUrl, tmpUri, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    if (!freshResolved(envelope.blobId)) await prefetchMediaUrls([envelope.blobId]);
+    const resolved = freshResolved(envelope.blobId);
+    let dl = resolved
+      ? await FileSystem.downloadAsync(resolved.url, tmpUri, {
+          headers: resolved.auth ? authHeaders : {},
+        })
+      : null;
+    if (!dl || dl.status !== 200) {
+      if (resolved) resolvedUrls.delete(envelope.blobId);
+      dl = await FileSystem.downloadAsync(envelope.downloadUrl, tmpUri, { headers: authHeaders });
+    }
     if (dl.status !== 200) {
       throw new Error(`Media download failed (${dl.status})`);
     }

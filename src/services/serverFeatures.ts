@@ -8,7 +8,7 @@
  */
 import { buildHealthUrl } from './api';
 
-export type ServerFeature = 'video' | 'presence' | 'direct_upload' | 'groups';
+export type ServerFeature = 'video' | 'presence' | 'direct_upload' | 'media_urls' | 'groups';
 
 let features = new Set<string>();
 let inflight: Promise<void> | null = null;

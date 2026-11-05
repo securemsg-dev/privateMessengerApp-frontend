@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Image,
   Modal,
@@ -14,6 +15,7 @@ import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-g
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
+import { useVideoPlayer, VideoView } from 'expo-video';
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
@@ -22,13 +24,37 @@ const DISMISS_DISTANCE = 120;
 const DISMISS_VELOCITY = 1000;
 
 export interface MediaViewerItem {
-  uri: string;
+  /** Message id — lets the caller patch in `uri` once a video downloads. */
+  key: string;
+  kind: 'image' | 'video';
+  /** Local decrypted file; undefined while a video is still downloading. */
+  uri?: string;
+  /** Poster (data URI) shown while a video downloads. */
+  posterUri?: string;
+  /** Set when the download/decrypt failed. */
+  error?: string;
   /** e.g. "You" or the sender's name. */
   title: string;
   /** ISO timestamp shown under the title. */
   timestamp?: string;
   mime?: string;
 }
+
+/** Native player for a downloaded video (own component: hooks need a uri). */
+const VideoPane = ({ uri }: { uri: string }) => {
+  const player = useVideoPlayer(uri, (p) => {
+    p.play();
+  });
+  return (
+    <VideoView
+      player={player}
+      style={StyleSheet.absoluteFill}
+      contentFit="contain"
+      nativeControls
+      allowsFullscreen={false}
+    />
+  );
+};
 
 interface Props {
   item: MediaViewerItem | null;
@@ -45,9 +71,12 @@ const containSize = (w: number, h: number, W: number, H: number) => {
 };
 
 /**
- * Full-screen image viewer: pinch / pan / double-tap zoom, swipe down to
+ * Full-screen media viewer. Images: pinch / pan / double-tap zoom, swipe down to
  * dismiss, tap to toggle the top bar, share via the OS sheet (which also
  * offers "Save Image" on iOS — so no photo-library permission is needed).
+ *
+ * Videos: download on demand (poster + spinner meanwhile), then the native
+ * expo-video player with system controls.
  *
  * Built on RNGH's Gesture API + RN Animated. Reanimated isn't installed, so
  * RNGH runs these callbacks on the JS thread — fine for a single image.
@@ -66,9 +95,10 @@ export const MediaViewerModal = ({ item, onClose }: Props) => {
   const saved = useRef({ scale: 1, x: 0, y: 0 });
   const live = useRef({ scale: 1, x: 0, y: 0 });
 
+  const isVideo = item?.kind === 'video';
   const uri = item?.uri;
   useEffect(() => {
-    if (!uri) return;
+    if (!uri || isVideo) return;
     // Reset per item.
     saved.current = { scale: 1, x: 0, y: 0 };
     live.current = { scale: 1, x: 0, y: 0 };
@@ -83,7 +113,7 @@ export const MediaViewerModal = ({ item, onClose }: Props) => {
       (w, h) => setNatural({ w, h }),
       () => setNatural(null),
     );
-  }, [uri, scale, tx, ty, dismissY]);
+  }, [uri, isVideo, scale, tx, ty, dismissY]);
 
   const content = containSize(natural?.w ?? 0, natural?.h ?? 0, W, H);
 
@@ -180,7 +210,7 @@ export const MediaViewerModal = ({ item, onClose }: Props) => {
   });
 
   const handleShare = async () => {
-    if (!item) return;
+    if (!item?.uri) return;
     try {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(item.uri, item.mime ? { mimeType: item.mime } : undefined);
@@ -213,7 +243,30 @@ export const MediaViewerModal = ({ item, onClose }: Props) => {
         <Animated.View
           style={[StyleSheet.absoluteFill, styles.backdrop, { opacity: backdropOpacity }]}
         />
-        {item && (
+        {item && isVideo && (
+          <View style={[StyleSheet.absoluteFill, styles.center]}>
+            {item.uri ? (
+              <VideoPane uri={item.uri} />
+            ) : (
+              <>
+                {item.posterUri && (
+                  <Image
+                    source={{ uri: item.posterUri }}
+                    style={StyleSheet.absoluteFill}
+                    resizeMode="contain"
+                    blurRadius={4}
+                  />
+                )}
+                {item.error ? (
+                  <Text style={styles.errorText}>{item.error}</Text>
+                ) : (
+                  <ActivityIndicator size="large" color="#fff" />
+                )}
+              </>
+            )}
+          </View>
+        )}
+        {item && !isVideo && item.uri && (
           <GestureDetector gesture={gesture}>
             <Animated.View
               style={[
@@ -223,7 +276,7 @@ export const MediaViewerModal = ({ item, onClose }: Props) => {
               ]}
             >
               <Animated.Image
-                source={{ uri: item.uri }}
+                source={{ uri: item.uri as string }}
                 resizeMode="contain"
                 style={{
                   width: content.width,
@@ -246,7 +299,13 @@ export const MediaViewerModal = ({ item, onClose }: Props) => {
               </Text>
               {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
             </View>
-            <Pressable onPress={handleShare} hitSlop={12} style={styles.iconBtn} accessibilityLabel="Share">
+            <Pressable
+              onPress={handleShare}
+              disabled={!item?.uri}
+              hitSlop={12}
+              style={[styles.iconBtn, !item?.uri && { opacity: 0.4 }]}
+              accessibilityLabel="Share"
+            >
               <Ionicons name="share-outline" size={24} color="#fff" />
             </Pressable>
           </View>
@@ -274,4 +333,5 @@ const styles = StyleSheet.create({
   titleWrap: { flex: 1, marginHorizontal: 8 },
   title: { color: '#fff', fontSize: 16, fontWeight: '600' },
   subtitle: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 2 },
+  errorText: { color: '#fff', fontSize: 15, paddingHorizontal: 24, textAlign: 'center' },
 });

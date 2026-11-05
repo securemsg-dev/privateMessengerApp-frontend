@@ -10,8 +10,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
 import { SwipeableMessage } from '../../../components/SwipeableMessage';
-import { Message } from '../../../store/slices/chatSlice';
-import { ON_PRIMARY, styles } from './styles';
+import { Message, mediaMetaOf } from '../../../store/slices/chatSlice';
+import { bubbleSize } from '../../../utils/mediaSize';
+import { formatDuration } from '../../../utils/waveform';
+import { MEDIA_BUBBLE_WIDTH, ON_PRIMARY, styles } from './styles';
 import { VoiceMessageBubble } from './VoiceMessageBubble';
 
 interface Colors {
@@ -117,26 +119,53 @@ export const MessageBubble = React.memo(
           </Text>
         );
       }
-      if (item.type === 'image' && item.mediaUri) {
-        return (
+      if (item.type === 'image' && (item.mediaUri || item.mediaEnvelope)) {
+        // Real aspect ratio (from the envelope) so the bubble doesn't jump
+        // when the photo arrives; a sized placeholder while it downloads.
+        const meta = mediaMetaOf(item);
+        const size = bubbleSize(meta.w, meta.h, MEDIA_BUBBLE_WIDTH);
+        return item.mediaUri ? (
           <Image
             source={{ uri: item.mediaUri }}
-            style={styles.mediaBubbleImage}
+            style={[styles.mediaBubbleImage, size]}
             resizeMode="cover"
           />
+        ) : (
+          <View
+            style={[
+              styles.mediaPlaceholder,
+              size,
+              { backgroundColor: isMine ? 'rgba(255,255,255,0.15)' : colors.border },
+            ]}
+          >
+            <ActivityIndicator color={isMine ? ON_PRIMARY : colors.primary} />
+          </View>
         );
       }
-      if (item.type === 'video' && item.mediaUri) {
+      if (item.type === 'video' && (item.mediaUri || item.mediaEnvelope)) {
+        // Poster frame from the envelope; the video itself downloads on tap.
+        const meta = mediaMetaOf(item);
+        const size = bubbleSize(meta.w, meta.h, MEDIA_BUBBLE_WIDTH);
         return (
-          <View style={styles.videoBubble}>
-            <Image
-              source={{ uri: item.mediaUri }}
-              style={styles.mediaBubbleImage}
-              resizeMode="cover"
-            />
+          <View style={[styles.videoBubble, size]}>
+            {meta.poster ? (
+              <Image
+                source={{ uri: `data:image/jpeg;base64,${meta.poster}` }}
+                style={[styles.mediaBubbleImage, size]}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={[size, { backgroundColor: '#1c1c1e' }]} />
+            )}
             <View style={styles.videoPlayOverlay}>
-              <Ionicons name="play-circle" size={40} color="rgba(255,255,255,0.9)" />
+              <Ionicons name="play-circle" size={44} color="rgba(255,255,255,0.92)" />
             </View>
+            {!!meta.durationMs && (
+              <View style={styles.videoDurationPill}>
+                <Ionicons name="videocam" size={11} color="#fff" />
+                <Text style={styles.videoDurationText}>{formatDuration(meta.durationMs)}</Text>
+              </View>
+            )}
           </View>
         );
       }
@@ -224,7 +253,9 @@ export const MessageBubble = React.memo(
             // Tap-to-view lives on this outer Pressable (not a nested one) so
             // long-press still reaches the action sheet.
             onPress={
-              !item.deletedAt && item.type === 'image' && item.mediaUri
+              !item.deletedAt &&
+              ((item.type === 'image' && item.mediaUri) ||
+                (item.type === 'video' && (item.mediaUri || item.mediaEnvelope)))
                 ? () => onOpenMedia(item)
                 : undefined
             }

@@ -2,13 +2,48 @@ import { Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { withoutAppLock } from '../utils/appLockGuard';
+import type { MediaMeta } from '../services/crypto';
+import {
+  MAX_VIDEO_BYTES,
+  prepareImage,
+  prepareVideo,
+  VideoTooLargeError,
+} from '../services/mediaPrep';
 
-type SendMediaAsset = (uri: string, mime: string, type: 'image' | 'video' | 'voice' | 'document') => Promise<void>;
+type SendMediaAsset = (
+  uri: string,
+  mime: string,
+  type: 'image' | 'video' | 'voice' | 'document',
+  meta?: MediaMeta,
+) => Promise<void>;
 
 export function useMediaPicker(
   sendMediaAsset: SendMediaAsset,
   closeTray: () => void,
 ) {
+  /** Optimise (resize photos, poster for videos) then hand to the sender. */
+  const sendPickedAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (asset.type === 'video') {
+      try {
+        const v = await prepareVideo(asset);
+        await sendMediaAsset(v.uri, v.mime, 'video', v.meta);
+      } catch (err) {
+        if (err instanceof VideoTooLargeError) {
+          const mb = (n: number) => Math.round(n / (1024 * 1024));
+          Alert.alert(
+            'Video too large',
+            `Videos can be up to ${mb(MAX_VIDEO_BYTES)} MB (this one is ${mb(err.sizeBytes)} MB). Try a shorter clip.`,
+          );
+          return;
+        }
+        throw err;
+      }
+      return;
+    }
+    const img = await prepareImage(asset.uri, asset.width, asset.height);
+    await sendMediaAsset(img.uri, img.mime, 'image', img.meta);
+  };
+
   const handlePickFromGallery = async () => {
     closeTray();
     // Uses the Android system photo picker (and iOS PHPicker), which grants
@@ -19,13 +54,12 @@ export function useMediaPicker(
       ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images', 'videos'],
         quality: 0.8,
+        // iOS transcodes videos to 720p on pick (Android has no equivalent).
+        videoExportPreset: ImagePicker.VideoExportPreset.H264_1280x720,
       }),
     );
     if (result && !result.canceled && result.assets.length > 0) {
-      const asset = result.assets[0];
-      const isVideo = asset.type === 'video';
-      const mime = asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg');
-      await sendMediaAsset(asset.uri, mime, isVideo ? 'video' : 'image');
+      await sendPickedAsset(result.assets[0]);
     }
   };
 
@@ -40,13 +74,11 @@ export function useMediaPicker(
       return ImagePicker.launchCameraAsync({
         mediaTypes: ['images', 'videos'],
         quality: 0.8,
+        videoExportPreset: ImagePicker.VideoExportPreset.H264_1280x720,
       });
     });
     if (result && !result.canceled && result.assets.length > 0) {
-      const asset = result.assets[0];
-      const isVideo = asset.type === 'video';
-      const mime = asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg');
-      await sendMediaAsset(asset.uri, mime, isVideo ? 'video' : 'image');
+      await sendPickedAsset(result.assets[0]);
     }
   };
 

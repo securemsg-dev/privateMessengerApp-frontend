@@ -81,7 +81,8 @@
           "microphonePermission": "Cricchat uses the microphone when you record a voice message to send in a conversation, or during a voice or video call. For example, hold the microphone button in a chat to record and send a voice note."
         }
       ],
-      "./plugins/withCallForegroundService"
+      "./plugins/withCallForegroundService",
+      "expo-video"
     ],
     "extra": {
       "eas": {

@@ -3,6 +3,7 @@ import { AppDispatch } from '../store';
 import {
   applyReactionEvent,
   clearActiveMessages,
+  effectiveType,
   markMessageDeletedForEveryone,
   mediaPlaceholder,
   Message,
@@ -77,7 +78,7 @@ export function useChatSocket(
             senderId: event.sender_id,
             receiverId: '',
             content: envelope ? mediaPlaceholder(envelope.mime) : plaintext,
-            type: event.message_type as Message['type'],
+            type: effectiveType(event.message_type, envelope),
             timestamp: event.timestamp,
             status: 'sent',
             reactions: [],
@@ -98,7 +99,8 @@ export function useChatSocket(
             incoming.type,
             incoming.mediaUri,
           );
-          if (envelope) {
+          // Videos download on tap (viewer), not automatically.
+          if (envelope && incoming.type !== 'video') {
             hydrateMediaFor(incoming.id, envelope);
           }
         })();

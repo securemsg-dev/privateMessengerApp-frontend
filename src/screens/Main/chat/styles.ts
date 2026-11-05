@@ -2,6 +2,8 @@ import { Dimensions, Platform, StyleSheet } from 'react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const BUBBLE_MAX_WIDTH = SCREEN_WIDTH * 0.74;
+/** Width of image/video content inside a media bubble (4pt padding each side). */
+export const MEDIA_BUBBLE_WIDTH = BUBBLE_MAX_WIDTH - 8;
 export const ON_PRIMARY = '#ffffff';
 
 export const styles = StyleSheet.create({
@@ -97,7 +99,25 @@ export const styles = StyleSheet.create({
     height: (BUBBLE_MAX_WIDTH - 8) * 0.75,
     borderRadius: 16,
   },
-  videoBubble: { position: 'relative' },
+  videoBubble: { position: 'relative', borderRadius: 16, overflow: 'hidden' },
+  mediaPlaceholder: {
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoDurationPill: {
+    position: 'absolute',
+    left: 8,
+    bottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  videoDurationText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   videoPlayOverlay: {
     position: 'absolute',
     top: 0,

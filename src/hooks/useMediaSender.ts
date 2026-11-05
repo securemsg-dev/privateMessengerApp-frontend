@@ -10,6 +10,7 @@ import {
 import { ChatSocket } from '../services/socket';
 import { encryptMessage, MediaMeta } from '../services/crypto';
 import { uploadEncryptedMedia } from '../services/media';
+import { serverHasFeature } from '../services/serverFeatures';
 
 export function useMediaSender(
   conversationId: string,
@@ -70,8 +71,16 @@ export function useMediaSender(
         );
         return;
       }
-      const wireType: 'text' | 'voice' | 'image' | 'document' =
-        msgType === 'voice' ? 'voice' : msgType === 'document' ? 'document' : 'image';
+      // Videos go out as 'video' when the backend knows the type; older
+      // backends get the legacy 'image' (receivers detect video by mime).
+      const wireType: 'voice' | 'image' | 'document' | 'video' =
+        msgType === 'voice'
+          ? 'voice'
+          : msgType === 'document'
+          ? 'document'
+          : msgType === 'video' && serverHasFeature('video')
+          ? 'video'
+          : 'image';
       socketRef.current?.send({
         type: 'message',
         message_type: wireType,
