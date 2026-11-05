@@ -36,6 +36,8 @@ interface Props {
   onLongPress: (m: Message, isSent: boolean, node: View) => void;
   onReply: (m: Message) => void;
   onPlayVoice: (id: string, uri: string) => Promise<void>;
+  /** Tap on a downloaded image → full-screen viewer. */
+  onOpenMedia: (m: Message) => void;
 }
 
 const formatBubbleTime = (iso: string) =>
@@ -73,6 +75,7 @@ export const MessageBubble = React.memo(
     onLongPress,
     onReply,
     onPlayVoice,
+    onOpenMedia,
   }: Props) => {
     const bubbleColor = isMine ? colors.primary : colors.surface;
     const textColor = isMine ? ON_PRIMARY : colors.text;
@@ -273,6 +276,13 @@ export const MessageBubble = React.memo(
             }}
             onLongPress={handleLongPress}
             delayLongPress={600}
+            // Tap-to-view lives on this outer Pressable (not a nested one) so
+            // long-press still reaches the action sheet.
+            onPress={
+              !item.deletedAt && item.type === 'image' && item.mediaUri
+                ? () => onOpenMedia(item)
+                : undefined
+            }
             style={[
               styles.bubble,
               { backgroundColor: bubbleColor },

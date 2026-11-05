@@ -25,6 +25,7 @@ interface Props {
   onReply: (m: Message) => void;
   onActionSheet: (m: Message, isSent: boolean, rect: BubbleRect) => void;
   onPlayVoice: (id: string, uri: string) => Promise<void>;
+  onOpenMedia: (m: Message) => void;
   /** Fetch the next older history page. No-op when history is complete. */
   onLoadOlder?: () => void;
   /** True while an older page is in flight — shows the top spinner. */
@@ -56,6 +57,7 @@ export const MessageList = ({
   onReply,
   onActionSheet,
   onPlayVoice,
+  onOpenMedia,
   onLoadOlder,
   loadingOlder,
 }: Props) => {
@@ -75,10 +77,11 @@ export const MessageList = ({
           onLongPress={(m, isSent, rect) => onActionSheet(m, isSent, rect as unknown as BubbleRect)}
           onReply={onReply}
           onPlayVoice={onPlayVoice}
+          onOpenMedia={onOpenMedia}
         />
       );
     },
-    [senderId, contactName, colors, playingId, messages, onReply, onActionSheet, onPlayVoice],
+    [senderId, contactName, colors, playingId, messages, onReply, onActionSheet, onPlayVoice, onOpenMedia],
   );
 
   // The list is inverted, so the "footer" renders at the TOP of the thread —

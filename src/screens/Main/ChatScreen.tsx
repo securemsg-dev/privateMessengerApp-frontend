@@ -30,6 +30,7 @@ import { ForwardSheet } from '../../components/ForwardSheet';
 import { ChatOverflowMenu } from '../../components/ChatOverflowMenu';
 import { ReportSheet } from '../../components/ReportSheet';
 import { EmojiPickerSheet } from '../../components/EmojiPickerSheet';
+import { MediaViewerModal, MediaViewerItem } from '../../components/MediaViewerModal';
 import { Message } from '../../store/slices/chatSlice';
 import { insertAtSelection, Selection } from '../../utils/textInsert';
 import { useCall } from '../../components/CallProvider';
@@ -118,6 +119,18 @@ export const ChatScreen = () => {
     null | { kind: 'composer' } | { kind: 'reaction'; message: Message }
   >(null);
   const selectionRef = useRef<Selection | null>(null);
+
+  // Full-screen media viewer (tap on an image bubble).
+  const [viewerItem, setViewerItem] = useState<MediaViewerItem | null>(null);
+  const handleOpenMedia = (m: Message) => {
+    if (!m.mediaUri) return;
+    setViewerItem({
+      uri: m.mediaUri,
+      title: m.senderId === senderId ? 'You' : contactName,
+      timestamp: m.timestamp,
+      mime: m.mediaEnvelope?.mime,
+    });
+  };
   const handleSelectionChange = (
     e: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
   ) => {
@@ -267,6 +280,7 @@ export const ChatScreen = () => {
           onReply={handleReply}
           onActionSheet={(m, isSent, rect) => actions.openActionSheet(m, isSent, rect)}
           onPlayVoice={handlePlayVoice}
+          onOpenMedia={handleOpenMedia}
           onLoadOlder={handleLoadOlder}
           loadingOlder={loadingOlder}
         />
@@ -363,6 +377,8 @@ export const ChatScreen = () => {
           setTimeout(() => setEmojiTarget({ kind: 'reaction', message: target }), 300);
         }}
       />
+
+      <MediaViewerModal item={viewerItem} onClose={() => setViewerItem(null)} />
 
       <EmojiPickerSheet
         open={emojiTarget !== null}
