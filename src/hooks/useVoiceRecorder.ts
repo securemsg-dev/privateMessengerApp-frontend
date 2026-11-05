@@ -3,9 +3,27 @@ import { Alert, Animated, PanResponder } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Audio } from 'expo-av';
 import { withoutAppLock } from '../utils/appLockGuard';
+import { MediaMeta } from '../services/crypto';
+import { buildWaveform, levelFromDb } from '../utils/waveform';
 
 type RecMode = 'idle' | 'recording' | 'preview';
-type SendMediaAsset = (uri: string, mime: string, type: 'image' | 'video' | 'voice') => Promise<void>;
+type SendMediaAsset = (
+  uri: string,
+  mime: string,
+  type: 'image' | 'video' | 'voice',
+  meta?: MediaMeta,
+) => Promise<void>;
+
+/** Bars in the live recording strip (RecordingBar). */
+export const LIVE_BARS = 22;
+/** How often expo-av reports duration + loudness while recording. */
+const STATUS_INTERVAL_MS = 80;
+const MIN_RECORDING_MS = 1000;
+
+const RECORDING_OPTIONS: Audio.RecordingOptions = {
+  ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+  isMeteringEnabled: true,
+};
 
 export function useVoiceRecorder(
   sendMediaAsset: SendMediaAsset,
@@ -16,17 +34,25 @@ export function useVoiceRecorder(
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [previewDuration, setPreviewDuration] = useState(0);
   const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [previewMeta, setPreviewMeta] = useState<MediaMeta>({});
 
   const recModeRef = useRef<RecMode>('idle');
   const recordingRef = useRef<Audio.Recording | null>(null);
-  const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Raw dBFS readings for the whole recording → summarised into the waveform.
+  const dbSamplesRef = useRef<number[]>([]);
+  const durationMsRef = useRef(0);
+  // Rolling window of the most recent levels for the live strip. Driven via
+  // Animated.Value.setValue so the 80 ms updates don't re-render ChatScreen.
+  const liveBufRef = useRef<number[]>(new Array(LIVE_BARS).fill(0));
+  const liveLevels = useRef(
+    Array.from({ length: LIVE_BARS }, () => new Animated.Value(0)),
+  ).current;
   const cancelledRef = useRef(false);
   const stoppedThisGestureRef = useRef(false);
   const previewSoundRef = useRef<Audio.Sound | null>(null);
 
   const cancelDx = useRef(new Animated.Value(0)).current;
   const redDotPulse = useRef(new Animated.Value(1)).current;
-  const waveformPhase = useRef(new Animated.Value(0)).current;
 
   const setRecModeSync = (m: RecMode) => {
     recModeRef.current = m;
@@ -39,6 +65,28 @@ export function useVoiceRecorder(
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  const resetLive = () => {
+    dbSamplesRef.current = [];
+    durationMsRef.current = 0;
+    liveBufRef.current = new Array(LIVE_BARS).fill(0);
+    liveLevels.forEach((v) => v.setValue(0));
+  };
+
+  const onRecordingStatus = (status: Audio.RecordingStatus) => {
+    if (!status.isRecording) return;
+    durationMsRef.current = status.durationMillis;
+    // Only re-render when the visible m:ss value changes.
+    const secs = Math.floor(status.durationMillis / 1000);
+    setRecordingDuration((prev) => (prev === secs ? prev : secs));
+    if (typeof status.metering === 'number') {
+      dbSamplesRef.current.push(status.metering);
+      const buf = liveBufRef.current;
+      buf.shift();
+      buf.push(levelFromDb(status.metering));
+      for (let i = 0; i < LIVE_BARS; i++) liveLevels[i].setValue(buf[i]);
+    }
+  };
+
   const startRec = async () => {
     closeTray();
     if (recModeRef.current !== 'idle') return;
@@ -49,17 +97,16 @@ export function useVoiceRecorder(
         return;
       }
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      resetLive();
       const { recording: rec } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        RECORDING_OPTIONS,
+        onRecordingStatus,
+        STATUS_INTERVAL_MS,
       );
       recordingRef.current = rec;
       setRecModeSync('recording');
       setRecordingDuration(0);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      recordingTimer.current = setInterval(
-        () => setRecordingDuration((d) => d + 1),
-        1000,
-      );
     } catch {
       Alert.alert('Error', 'Could not start recording.');
     }
@@ -68,23 +115,31 @@ export function useVoiceRecorder(
   const stopRec = async () => {
     const rec = recordingRef.current;
     if (!rec || recModeRef.current !== 'recording') return;
-    if (recordingTimer.current) {
-      clearInterval(recordingTimer.current);
-      recordingTimer.current = null;
-    }
-    let finalDuration = 0;
-    setRecordingDuration((d) => {
-      finalDuration = d;
-      return d;
-    });
+    // Claim the recording now so an overlapping stop/cancel (gesture release
+    // racing the stop button) can't unload it twice.
+    recordingRef.current = null;
     try {
+      // Read the precise final length before unloading (the last status
+      // callback can be up to one interval stale).
+      try {
+        const st = await rec.getStatusAsync();
+        if (st.durationMillis) durationMsRef.current = st.durationMillis;
+      } catch {
+        /* fall back to the last status callback's value */
+      }
       await rec.stopAndUnloadAsync();
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
       const uri = rec.getURI();
       recordingRef.current = null;
-      if (uri && finalDuration >= 1) {
+      const durationMs = durationMsRef.current;
+      if (uri && durationMs >= MIN_RECORDING_MS) {
+        const waveform = buildWaveform(dbSamplesRef.current);
         setPreviewUri(uri);
-        setPreviewDuration(finalDuration);
+        setPreviewDuration(Math.max(1, Math.round(durationMs / 1000)));
+        setPreviewMeta({
+          durationMs: Math.round(durationMs),
+          ...(waveform.length ? { waveform } : {}),
+        });
         setRecModeSync('preview');
       } else {
         setRecModeSync('idle');
@@ -99,10 +154,6 @@ export function useVoiceRecorder(
 
   const cancelRec = async () => {
     const rec = recordingRef.current;
-    if (recordingTimer.current) {
-      clearInterval(recordingTimer.current);
-      recordingTimer.current = null;
-    }
     setRecModeSync('idle');
     setRecordingDuration(0);
     if (!rec) return;
@@ -127,12 +178,14 @@ export function useVoiceRecorder(
     setPreviewUri(null);
     setPreviewDuration(0);
     setPreviewPlaying(false);
+    setPreviewMeta({});
     setRecModeSync('idle');
   };
 
   const sendPreview = async () => {
     if (!previewUri) return;
     const uri = previewUri;
+    const meta = previewMeta;
     if (previewSoundRef.current) {
       try {
         await previewSoundRef.current.stopAsync();
@@ -145,9 +198,10 @@ export function useVoiceRecorder(
     setPreviewUri(null);
     setPreviewDuration(0);
     setPreviewPlaying(false);
+    setPreviewMeta({});
     setRecModeSync('idle');
     setRecordingDuration(0);
-    void sendMediaAsset(uri, 'audio/aac', 'voice');
+    void sendMediaAsset(uri, 'audio/aac', 'voice', meta);
   };
 
   const togglePreviewPlayback = async () => {
@@ -192,19 +246,13 @@ export function useVoiceRecorder(
           Animated.timing(redDotPulse, { toValue: 1, duration: 500, useNativeDriver: true }),
         ]),
       );
-      const wave = Animated.loop(
-        Animated.timing(waveformPhase, { toValue: 1, duration: 1400, useNativeDriver: false }),
-      );
       pulse.start();
-      wave.start();
       return () => {
         pulse.stop();
-        wave.stop();
         redDotPulse.setValue(1);
-        waveformPhase.setValue(0);
       };
     }
-  }, [recMode, redDotPulse, waveformPhase]);
+  }, [recMode, redDotPulse]);
 
   const recPan = useRef(
     PanResponder.create({
@@ -252,7 +300,8 @@ export function useVoiceRecorder(
     previewPlaying,
     cancelDx,
     redDotPulse,
-    waveformPhase,
+    liveLevels,
+    previewMeta,
     recPan,
     formatDuration,
     startRec,

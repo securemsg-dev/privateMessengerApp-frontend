@@ -527,7 +527,10 @@ export const ChatListScreen = () => {
           </View>
           <Text style={[styles.rowPreview, { color: colors.textSecondary }]} numberOfLines={1}>
             {item.lastMessageType === 'voice'
-              ? `🎤 Voice · ${item.lastMessage.match(/\d+:\d+/)?.[0] || ''}`
+              ? (() => {
+                  const d = item.lastMessage.match(/\d+:\d+/)?.[0];
+                  return d ? `🎤 Voice · ${d}` : '🎤 Voice message';
+                })()
               : item.lastMessageType === 'image'
               ? '📷 Photo'
               : item.lastMessageType === 'video'

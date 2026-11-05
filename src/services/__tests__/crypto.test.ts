@@ -162,4 +162,23 @@ describe('parseMediaEnvelope', () => {
       parseMediaEnvelope(JSON.stringify({ ...valid, sizeBytes: '123' })),
     ).toBeNull();
   });
+
+  it('keeps well-formed display metadata (voice duration + waveform, dimensions)', () => {
+    const withMeta = { ...valid, durationMs: 12_345, waveform: [0, 10, 31], w: 1600, h: 1200 };
+    expect(parseMediaEnvelope(JSON.stringify(withMeta))).toEqual(withMeta);
+  });
+
+  it('drops malformed metadata but still accepts the envelope', () => {
+    const parsed = parseMediaEnvelope(
+      JSON.stringify({
+        ...valid,
+        durationMs: -5,
+        waveform: 'loud',
+        w: 1600, // h missing → dimensions dropped as a pair
+        poster: 42,
+        extra: 'ignored',
+      }),
+    );
+    expect(parsed).toEqual(valid);
+  });
 });

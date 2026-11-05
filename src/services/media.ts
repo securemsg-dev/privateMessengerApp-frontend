@@ -42,6 +42,8 @@ import {
   encryptBytes,
   makeMediaKey,
   MediaEnvelope,
+  MediaMeta,
+  sanitizeMediaMeta,
 } from './crypto';
 
 const CACHE_SUBDIR = 'decrypted-media';
@@ -94,6 +96,7 @@ export interface UploadResult {
 export async function uploadEncryptedMedia(
   localUri: string,
   mime: string,
+  meta: MediaMeta = {},
 ): Promise<UploadResult> {
   // 1. Read + encrypt
   const plain = await readFileBytes(localUri);
@@ -142,6 +145,9 @@ export async function uploadEncryptedMedia(
       nonce: naclUtil.encodeBase64(nonce),
       mime,
       sizeBytes: plain.length, // pre-encryption size for progress UI
+      // Display metadata (duration, waveform, dimensions…) rides inside the
+      // E2EE envelope — the server never sees it; old clients ignore it.
+      ...sanitizeMediaMeta(meta as Record<string, unknown>),
     },
   };
 }

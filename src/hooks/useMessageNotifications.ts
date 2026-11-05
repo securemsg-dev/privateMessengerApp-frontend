@@ -7,7 +7,8 @@ import {
   loadConversationsThunk,
   MessageType,
 } from '../store/slices/chatSlice';
-import { decryptOrFallback } from '../services/crypto';
+import { decryptOrFallback, parseMediaEnvelope } from '../services/crypto';
+import { voicePreviewText } from '../utils/waveform';
 import { userSocketBus } from '../services/userSocketBus';
 
 /** Short, list-friendly preview for non-text messages (payload is encrypted
@@ -64,10 +65,16 @@ export function useMessageNotifications() {
       }
 
       void (async () => {
-        const typePreview = previewForType(messageType);
-        const preview =
-          typePreview ??
-          (await decryptOrFallback(encryptedPayload, conv.contactPublicKey));
+        let preview: string;
+        if (messageType === 'voice') {
+          // Decrypt the envelope just to read the duration for "🎤 Voice · 0:12".
+          const plaintext = await decryptOrFallback(encryptedPayload, conv.contactPublicKey);
+          preview = voicePreviewText(parseMediaEnvelope(plaintext)?.durationMs);
+        } else {
+          preview =
+            previewForType(messageType) ??
+            (await decryptOrFallback(encryptedPayload, conv.contactPublicKey));
+        }
         dispatch(
           applyMessageNotification({
             conversationId,

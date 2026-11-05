@@ -3,7 +3,8 @@ import { Animated, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ON_PRIMARY, styles } from './styles';
 
-const WAVE_BARS = 22;
+/** Bar height at full level; actual height = scaleY × this. */
+const BAR_MAX_HEIGHT = 22;
 
 interface Colors {
   text: string;
@@ -18,7 +19,8 @@ interface Props {
   recordingDuration: number;
   cancelDx: Animated.Value;
   redDotPulse: Animated.Value;
-  waveformPhase: Animated.Value;
+  /** Live microphone levels (0..1), newest last — from useVoiceRecorder. */
+  liveLevels: Animated.Value[];
   recPan: { panHandlers: object };
   colors: Colors;
   formatDuration: (secs: number) => string;
@@ -29,7 +31,7 @@ export const RecordingBar = ({
   recordingDuration,
   cancelDx,
   redDotPulse,
-  waveformPhase,
+  liveLevels,
   recPan,
   colors,
   formatDuration,
@@ -55,30 +57,30 @@ export const RecordingBar = ({
       </Text>
     </View>
 
-    {/* Live waveform */}
+    {/* Live waveform — real microphone levels */}
     <View style={styles.waveformLive}>
-      {Array.from({ length: WAVE_BARS }).map((_, i) => {
-        const phaseOffset = i / WAVE_BARS;
-        const height = waveformPhase.interpolate({
-          inputRange: [0, 0.25, 0.5, 0.75, 1],
-          outputRange: [
-            4 + Math.abs(Math.sin((phaseOffset + 0) * Math.PI * 2)) * 18,
-            4 + Math.abs(Math.sin((phaseOffset + 0.25) * Math.PI * 2)) * 18,
-            4 + Math.abs(Math.sin((phaseOffset + 0.5) * Math.PI * 2)) * 18,
-            4 + Math.abs(Math.sin((phaseOffset + 0.75) * Math.PI * 2)) * 18,
-            4 + Math.abs(Math.sin((phaseOffset + 1) * Math.PI * 2)) * 18,
-          ],
-        });
-        return (
-          <Animated.View
-            key={i}
-            style={[
-              styles.waveBarLive,
-              { height, backgroundColor: colors.primary, opacity: 0.8 },
-            ]}
-          />
-        );
-      })}
+      {liveLevels.map((level, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            styles.waveBarLive,
+            {
+              height: BAR_MAX_HEIGHT,
+              backgroundColor: colors.primary,
+              opacity: 0.8,
+              transform: [
+                {
+                  scaleY: level.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.15, 1],
+                    extrapolate: 'clamp',
+                  }),
+                },
+              ],
+            },
+          ]}
+        />
+      ))}
     </View>
 
     <View style={styles.slideHint}>

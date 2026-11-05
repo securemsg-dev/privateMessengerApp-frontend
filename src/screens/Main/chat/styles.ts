@@ -115,7 +115,7 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    minWidth: 170,
+    minWidth: 210,
   },
   voicePlayBtn: {
     width: 30,
@@ -128,10 +128,11 @@ export const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
-    height: 26,
+    gap: 1.5,
+    height: 28,
   },
-  waveBar: { width: 2.5, borderRadius: 2 },
+  // Flexible bars: 40 of them must fit the narrowest bubble.
+  waveBar: { flex: 1, maxWidth: 3, minWidth: 1.5, borderRadius: 2 },
   voiceDuration: { fontSize: 11, fontWeight: '600', minWidth: 32 },
 
   /* Info card (self chat) */

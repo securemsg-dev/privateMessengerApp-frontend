@@ -13,7 +13,8 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 
 import { useTheme } from '../theme/ThemeContext';
-import { Message } from '../store/slices/chatSlice';
+import { Message, mediaMetaOf } from '../store/slices/chatSlice';
+import { voicePreviewText } from '../utils/waveform';
 
 export const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const ON_PRIMARY = '#ffffff';
@@ -140,7 +141,7 @@ export const MessageActionSheet = ({
     if (message.type === 'voice') {
       return (
         <Text style={[styles.cloneText, { color: textColor }]}>
-          🎤 {message.content.match(/Voice message \([^)]+\)/)?.[0] || 'Voice message'}
+          {voicePreviewText(mediaMetaOf(message).durationMs)}
         </Text>
       );
     }

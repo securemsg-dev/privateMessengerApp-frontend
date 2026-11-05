@@ -11,7 +11,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
 import { SwipeableMessage } from '../../../components/SwipeableMessage';
 import { Message } from '../../../store/slices/chatSlice';
-import { BUBBLE_MAX_WIDTH, ON_PRIMARY, styles } from './styles';
+import { ON_PRIMARY, styles } from './styles';
+import { VoiceMessageBubble } from './VoiceMessageBubble';
 
 interface Colors {
   text: string;
@@ -31,11 +32,9 @@ interface Props {
   senderId: string;
   contactName: string;
   colors: Colors;
-  playingId: string | null;
   messages: Message[];
   onLongPress: (m: Message, isSent: boolean, node: View) => void;
   onReply: (m: Message) => void;
-  onPlayVoice: (id: string, uri: string) => Promise<void>;
   /** Tap on a downloaded image → full-screen viewer. */
   onOpenMedia: (m: Message) => void;
 }
@@ -70,11 +69,9 @@ export const MessageBubble = React.memo(
     senderId,
     contactName,
     colors,
-    playingId,
     messages,
     onLongPress,
     onReply,
-    onPlayVoice,
     onOpenMedia,
   }: Props) => {
     const bubbleColor = isMine ? colors.primary : colors.surface;
@@ -143,66 +140,14 @@ export const MessageBubble = React.memo(
           </View>
         );
       }
-      if (item.type === 'voice' && item.mediaUri) {
-        const isPlaying = playingId === item.id;
+      if (item.type === 'voice' && (item.mediaUri || item.mediaEnvelope)) {
         return (
-          <TouchableOpacity
-            style={styles.voiceBubble}
-            onPress={() => onPlayVoice(item.id, item.mediaUri!)}
-            activeOpacity={0.7}
-          >
-            <View
-              style={[
-                styles.voicePlayBtn,
-                {
-                  backgroundColor: isMine
-                    ? 'rgba(255,255,255,0.25)'
-                    : colors.primary + '22',
-                },
-              ]}
-            >
-              {isPlaying ? (
-                <ActivityIndicator size="small" color={isMine ? ON_PRIMARY : colors.primary} />
-              ) : (
-                <Ionicons
-                  name="play"
-                  size={16}
-                  color={isMine ? ON_PRIMARY : colors.primary}
-                />
-              )}
-            </View>
-            <View style={styles.waveform}>
-              {Array.from({ length: 20 }).map((_, i) => {
-                const h = 4 + ((item.id.charCodeAt(i % item.id.length) + i * 7) % 18);
-                return (
-                  <View
-                    key={i}
-                    style={[
-                      styles.waveBar,
-                      {
-                        height: h,
-                        backgroundColor: isMine
-                          ? isPlaying && i < 10
-                            ? ON_PRIMARY
-                            : 'rgba(255,255,255,0.5)'
-                          : isPlaying && i < 10
-                          ? colors.primary
-                          : colors.border,
-                      },
-                    ]}
-                  />
-                );
-              })}
-            </View>
-            <Text
-              style={[
-                styles.voiceDuration,
-                { color: isMine ? 'rgba(255,255,255,0.85)' : colors.textSecondary },
-              ]}
-            >
-              {item.content.match(/\d+:\d+/)?.[0] || '0:00'}
-            </Text>
-          </TouchableOpacity>
+          <VoiceMessageBubble
+            item={item}
+            isMine={isMine}
+            colors={colors}
+            onLongPress={handleLongPress}
+          />
         );
       }
       if (item.type === 'document') {

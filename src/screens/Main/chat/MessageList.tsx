@@ -20,11 +20,9 @@ interface Props {
   senderId: string;
   contactName: string;
   colors: Colors;
-  playingId: string | null;
   isSelfChat: boolean | undefined;
   onReply: (m: Message) => void;
   onActionSheet: (m: Message, isSent: boolean, rect: BubbleRect) => void;
-  onPlayVoice: (id: string, uri: string) => Promise<void>;
   onOpenMedia: (m: Message) => void;
   /** Fetch the next older history page. No-op when history is complete. */
   onLoadOlder?: () => void;
@@ -52,11 +50,9 @@ export const MessageList = ({
   senderId,
   contactName,
   colors,
-  playingId,
   isSelfChat,
   onReply,
   onActionSheet,
-  onPlayVoice,
   onOpenMedia,
   onLoadOlder,
   loadingOlder,
@@ -72,16 +68,14 @@ export const MessageList = ({
           senderId={senderId}
           contactName={contactName}
           colors={colors}
-          playingId={playingId}
           messages={messages}
           onLongPress={(m, isSent, rect) => onActionSheet(m, isSent, rect as unknown as BubbleRect)}
           onReply={onReply}
-          onPlayVoice={onPlayVoice}
           onOpenMedia={onOpenMedia}
         />
       );
     },
-    [senderId, contactName, colors, playingId, messages, onReply, onActionSheet, onPlayVoice, onOpenMedia],
+    [senderId, contactName, colors, messages, onReply, onActionSheet, onOpenMedia],
   );
 
   // The list is inverted, so the "footer" renders at the TOP of the thread —

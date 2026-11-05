@@ -1,9 +1,8 @@
 import React from 'react';
-import { Animated, Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ON_PRIMARY, styles } from './styles';
-
-const WAVE_BARS = 22;
+import { WAVEFORM_MAX } from '../../../utils/waveform';
 
 interface Colors {
   textSecondary: string;
@@ -17,7 +16,8 @@ interface Colors {
 interface Props {
   previewDuration: number;
   previewPlaying: boolean;
-  waveformPhase: Animated.Value;
+  /** Recorded waveform (quantized bars); empty when metering was unavailable. */
+  waveform?: number[];
   colors: Colors;
   formatDuration: (secs: number) => string;
   discardPreview: () => void;
@@ -28,7 +28,7 @@ interface Props {
 export const PreviewBar = ({
   previewDuration,
   previewPlaying,
-  waveformPhase,
+  waveform,
   colors,
   formatDuration,
   discardPreview,
@@ -63,21 +63,26 @@ export const PreviewBar = ({
         />
       </TouchableOpacity>
 
-      {/* Static waveform preview */}
+      {/* Recorded waveform (falls back to a gentle placeholder curve) */}
       <View style={styles.waveformLive}>
-        {Array.from({ length: WAVE_BARS }).map((_, i) => {
-          const phaseOffset = i / WAVE_BARS;
-          const h = 4 + Math.abs(Math.sin(phaseOffset * Math.PI * 2)) * 18;
-          return (
-            <Animated.View
-              key={i}
-              style={[
-                styles.waveBarLive,
-                { height: h, backgroundColor: colors.primary, opacity: 0.55 },
-              ]}
-            />
-          );
-        })}
+        {(waveform && waveform.length
+          ? waveform
+          : Array.from({ length: 22 }, (_, i) =>
+              Math.abs(Math.sin((i / 22) * Math.PI * 2)) * WAVEFORM_MAX,
+            )
+        ).map((v, i) => (
+          <View
+            key={i}
+            style={[
+              styles.waveBarLive,
+              {
+                height: 4 + (v / WAVEFORM_MAX) * 18,
+                backgroundColor: colors.primary,
+                opacity: 0.55,
+              },
+            ]}
+          />
+        ))}
       </View>
 
       <Text style={[styles.previewDurText, { color: colors.textSecondary }]}>

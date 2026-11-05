@@ -8,7 +8,7 @@ import {
   updateMessageStatus,
 } from '../store/slices/chatSlice';
 import { ChatSocket } from '../services/socket';
-import { encryptMessage } from '../services/crypto';
+import { encryptMessage, MediaMeta } from '../services/crypto';
 import { uploadEncryptedMedia } from '../services/media';
 
 export function useMediaSender(
@@ -24,6 +24,7 @@ export function useMediaSender(
     localUri: string,
     mime: string,
     msgType: 'image' | 'video' | 'voice' | 'document',
+    meta?: MediaMeta,
   ) => {
     const localId =
       Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -38,6 +39,7 @@ export function useMediaSender(
         content: placeholder,
         type: msgType as MessageType,
         mediaUri: localUri,
+        mediaMeta: meta,
       }),
     );
 
@@ -55,7 +57,7 @@ export function useMediaSender(
         );
         return;
       }
-      const { envelope } = await uploadEncryptedMedia(localUri, mime);
+      const { envelope } = await uploadEncryptedMedia(localUri, mime, meta);
       let payload: string;
       try {
         payload = await encryptMessage(JSON.stringify(envelope), peerKey);

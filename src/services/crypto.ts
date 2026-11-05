@@ -29,6 +29,7 @@ import naclUtil from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 
 import * as SecureStore from '../utils/secureStorage';
+import { sanitizeWaveform } from '../utils/waveform';
 
 // ── PRNG: hook tweetnacl into Expo's CSPRNG ──────────────────────────────────
 // tweetnacl needs a high-quality random source. We wire it to expo-crypto
@@ -282,7 +283,24 @@ export async function decryptOrFallback(
 //      private key can unlock it, so the server never sees the symmetric key.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface MediaEnvelope {
+/**
+ * Optional display metadata carried inside the (encrypted) envelope. All
+ * fields are optional: older clients neither send nor read them, and the UI
+ * must render sensibly without any of them.
+ */
+export interface MediaMeta {
+  /** Voice/video length in milliseconds. */
+  durationMs?: number;
+  /** Voice waveform: quantized bar heights (see utils/waveform.ts). */
+  waveform?: number[];
+  /** Pixel dimensions of an image/video, for correct bubble aspect ratio. */
+  w?: number;
+  h?: number;
+  /** Small base64 JPEG poster frame (video). */
+  poster?: string;
+}
+
+export interface MediaEnvelope extends MediaMeta {
   kind: 'media';
   blobId: string;
   downloadUrl: string;
@@ -292,6 +310,32 @@ export interface MediaEnvelope {
   nonce: string;
   mime: string;
   sizeBytes: number;
+}
+
+const finitePositive = (v: unknown, max: number): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= max ? v : undefined;
+
+/**
+ * Keep only well-formed metadata. The envelope is authenticated, but its
+ * contents are still chosen by the (possibly buggy or hostile) sender.
+ */
+export function sanitizeMediaMeta(raw: Record<string, unknown>): MediaMeta {
+  const meta: MediaMeta = {};
+  const durationMs = finitePositive(raw.durationMs, 6 * 60 * 60 * 1000);
+  if (durationMs !== undefined) meta.durationMs = Math.round(durationMs);
+  const waveform = sanitizeWaveform(raw.waveform);
+  if (waveform) meta.waveform = waveform;
+  const w = finitePositive(raw.w, 20000);
+  const h = finitePositive(raw.h, 20000);
+  if (w !== undefined && h !== undefined) {
+    meta.w = Math.round(w);
+    meta.h = Math.round(h);
+  }
+  // ~48 KB of base64 is far above what we generate (~16 KB) but bounded.
+  if (typeof raw.poster === 'string' && raw.poster.length > 0 && raw.poster.length <= 48_000) {
+    meta.poster = raw.poster;
+  }
+  return meta;
 }
 
 /** Generate a fresh symmetric key + nonce for a single media blob. */
@@ -351,5 +395,14 @@ export function parseMediaEnvelope(plaintext: string): MediaEnvelope | null {
   ) {
     return null;
   }
-  return parsed as MediaEnvelope;
+  return {
+    kind: 'media',
+    blobId: e.blobId,
+    downloadUrl: e.downloadUrl,
+    key: e.key,
+    nonce: e.nonce,
+    mime: e.mime,
+    sizeBytes: e.sizeBytes,
+    ...sanitizeMediaMeta(e),
+  };
 }

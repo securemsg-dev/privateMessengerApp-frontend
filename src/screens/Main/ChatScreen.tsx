@@ -40,7 +40,7 @@ import { useChatSocket } from '../../hooks/useChatSocket';
 import { useReadReceipts } from '../../hooks/useReadReceipts';
 import { useMediaHydration } from '../../hooks/useMediaHydration';
 import { useReplyContext } from '../../hooks/useReplyContext';
-import { useVoicePlayback } from '../../hooks/useVoicePlayback';
+import { useStopVoiceOnUnmount } from '../../hooks/useVoicePlayback';
 import { useMediaSender } from '../../hooks/useMediaSender';
 import { useTextSender } from '../../hooks/useTextSender';
 import { useMediaPicker } from '../../hooks/useMediaPicker';
@@ -156,7 +156,7 @@ export const ChatScreen = () => {
   const { replyTo, handleReply, dismissReply } = useReplyContext(
     messages, senderId, displayName, contactName, textInputRef,
   );
-  const { playingId, soundRef, handlePlayVoice } = useVoicePlayback();
+  useStopVoiceOnUnmount();
   const { sendMediaAsset } = useMediaSender(
     conversationId, senderId, contactPrivateNumber, isSelfChat, socketRef, peerPublicKeyRef, dispatch,
   );
@@ -228,11 +228,6 @@ export const ChatScreen = () => {
     };
   }, [conversationId, dispatch, isSelfChat]);
 
-  // Unload playback sound on unmount
-  useEffect(() => {
-    return () => { soundRef.current?.unloadAsync(); };
-  }, [soundRef]);
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.background }}>
@@ -275,11 +270,9 @@ export const ChatScreen = () => {
           senderId={senderId}
           contactName={contactName}
           colors={colors}
-          playingId={playingId}
           isSelfChat={isSelfChat}
           onReply={handleReply}
           onActionSheet={(m, isSent, rect) => actions.openActionSheet(m, isSent, rect)}
-          onPlayVoice={handlePlayVoice}
           onOpenMedia={handleOpenMedia}
           onLoadOlder={handleLoadOlder}
           loadingOlder={loadingOlder}
@@ -289,7 +282,7 @@ export const ChatScreen = () => {
           <PreviewBar
             previewDuration={recorder.previewDuration}
             previewPlaying={recorder.previewPlaying}
-            waveformPhase={recorder.waveformPhase}
+            waveform={recorder.previewMeta.waveform}
             colors={colors}
             formatDuration={recorder.formatDuration}
             discardPreview={recorder.discardPreview}
@@ -306,7 +299,7 @@ export const ChatScreen = () => {
                 recordingDuration={recorder.recordingDuration}
                 cancelDx={recorder.cancelDx}
                 redDotPulse={recorder.redDotPulse}
-                waveformPhase={recorder.waveformPhase}
+                liveLevels={recorder.liveLevels}
                 recPan={recorder.recPan}
                 colors={colors}
                 formatDuration={recorder.formatDuration}

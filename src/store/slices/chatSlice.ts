@@ -14,9 +14,11 @@ import {
 import {
   decryptOrFallback,
   MediaEnvelope,
+  MediaMeta,
   parseMediaEnvelope,
 } from '../../services/crypto';
 import { cacheGet, cacheSet, CACHE_KEYS } from '../../services/cache';
+import { voicePreviewText } from '../../utils/waveform';
 
 /* ── Types ─────────────────────────────────────────────── */
 
@@ -87,6 +89,17 @@ export interface Message {
   // the local cached path after we download + decrypt; until then the UI
   // shows a placeholder. Null for plain text messages.
   mediaEnvelope: MediaEnvelope | null;
+  /**
+   * Display metadata known locally for messages WE sent (duration, waveform,
+   * dimensions) before an envelope exists. Received/reloaded messages carry
+   * the same fields on `mediaEnvelope` — read via `mediaMetaOf()`.
+   */
+  mediaMeta?: MediaMeta;
+}
+
+/** Display metadata for a media message, from whichever source has it. */
+export function mediaMetaOf(m: Pick<Message, 'mediaEnvelope' | 'mediaMeta'>): MediaMeta {
+  return { ...(m.mediaEnvelope ?? {}), ...(m.mediaMeta ?? {}) };
 }
 
 interface ChatState {
@@ -175,7 +188,11 @@ export const loadConversationsThunk = createAsyncThunk<Conversation[]>(
             ? lastMsg.message_type === 'text'
               ? await decryptOrFallback(lastMsg.encrypted_payload, peerKey)
               : lastMsg.message_type === 'voice'
-              ? '🎤 Voice message'
+              ? voicePreviewText(
+                  parseMediaEnvelope(
+                    await decryptOrFallback(lastMsg.encrypted_payload, peerKey),
+                  )?.durationMs,
+                )
               : lastMsg.message_type === 'image'
               ? '📷 Photo'
               : ''
@@ -419,6 +436,8 @@ export const sendMessageThunk = createAsyncThunk(
     replyTo?: ReplyPreview | null;
     /** Phase D — encrypted-media envelope for non-text messages. */
     mediaEnvelope?: MediaEnvelope | null;
+    /** Locally-known display metadata (voice duration/waveform, dimensions). */
+    mediaMeta?: MediaMeta;
   }) => {
     const id =
       payload.id ??
@@ -450,6 +469,7 @@ export const sendMessageThunk = createAsyncThunk(
       deletedAt: null,
       deletedBy: null,
       mediaEnvelope: payload.mediaEnvelope ?? null,
+      ...(payload.mediaMeta ? { mediaMeta: payload.mediaMeta } : {}),
     };
     return message;
   },
