@@ -7,21 +7,27 @@ import {
   markMessageDeletedForEveryone,
   mediaPlaceholder,
   Message,
+  refreshConversationThunk,
   setPeerPresence,
   updateMessageStatus,
   upsertMessage,
 } from '../store/slices/chatSlice';
-import { ChatSocket, ServerEvent } from '../services/socket';
+import { ChatSocket, ServerEvent, ServerMessageEvent } from '../services/socket';
 import { saveMessage as saveMessageLocal } from '../services/database';
-import { decryptOrFallback, MediaEnvelope, parseMediaEnvelope } from '../services/crypto';
+import { MediaEnvelope, parseMediaEnvelope } from '../services/crypto';
+import { CryptoConv, decryptFor } from '../services/conversationCrypto';
+import { Outbox } from '../services/outbox';
 
 export function useChatSocket(
   conversationId: string,
   isSelfChat: boolean | undefined,
   senderId: string,
-  peerPublicKeyRef: MutableRefObject<string | null>,
+  cryptoRef: MutableRefObject<CryptoConv>,
+  outboxRef: MutableRefObject<Outbox | null>,
   dispatch: AppDispatch,
   hydrateMediaFor: (messageId: string, envelope: MediaEnvelope) => void,
+  /** Called when the server says we're no longer a member (4403). */
+  onAccessRevoked?: () => void,
 ) {
   const socketRef = useRef<ChatSocket | null>(null);
   const senderIdRef = useRef(senderId);
@@ -30,80 +36,88 @@ export function useChatSocket(
   useEffect(() => {
     senderIdRef.current = senderId;
   }, [senderId]);
+  const onAccessRevokedRef = useRef(onAccessRevoked);
+  onAccessRevokedRef.current = onAccessRevoked;
+
+  const handleMessage = async (event: ServerMessageEvent) => {
+    const isMine = event.sender_id === senderIdRef.current;
+    if (isMine) outboxRef.current?.ack(event.client_temp_id);
+
+    // Decrypt everything — including our own echo, so a message we sent
+    // from another device shows text instead of ciphertext.
+    const plaintext = await decryptFor(
+      cryptoRef.current,
+      {
+        payload: event.encrypted_payload,
+        messageType: event.message_type,
+        senderId: event.sender_id,
+        senderPublicKey: event.sender_public_key,
+      },
+      senderIdRef.current,
+    );
+    const envelope = event.message_type === 'system' ? null : parseMediaEnvelope(plaintext);
+    const message: Message = {
+      // Always the server id: if there's an optimistic row it keeps its
+      // local id (matchClientTempId below); if not, this is what we insert.
+      id: event.message_id,
+      conversationId: event.conversation_id,
+      senderId: event.sender_id,
+      receiverId: '',
+      content: envelope ? mediaPlaceholder(envelope.mime) : plaintext,
+      type: effectiveType(event.message_type, envelope),
+      timestamp: event.timestamp,
+      status: 'sent',
+      reactions: [],
+      isStarred: false,
+      replyToId: event.reply_to_id ?? null,
+      replyPreview: null,
+      deletedAt: null,
+      deletedBy: null,
+      mediaEnvelope: envelope,
+      senderName: event.sender_display_name ?? null,
+    };
+
+    if (isMine) {
+      // Matches the optimistic row when there is one (keeps its local id,
+      // media path and metadata); otherwise inserts the decrypted message.
+      dispatch(upsertMessage({ message, matchClientTempId: event.client_temp_id ?? undefined }));
+      return;
+    }
+
+    dispatch(upsertMessage({ message }));
+    void saveMessageLocal(
+      message.id,
+      message.conversationId,
+      message.senderId,
+      message.receiverId,
+      message.content,
+      message.type,
+      message.mediaUri,
+    );
+    // Videos download on tap (viewer), not automatically.
+    if (envelope && message.type !== 'video') {
+      hydrateMediaFor(message.id, envelope);
+    }
+  };
 
   const handleSocketEvent = useCallback(
     (event: ServerEvent) => {
       if (event.type === 'message') {
-        if (event.sender_id === senderIdRef.current) {
-          if (event.client_temp_id) {
-            dispatch(
-              upsertMessage({
-                message: {
-                  id: event.client_temp_id,
-                  conversationId: event.conversation_id,
-                  senderId: event.sender_id,
-                  receiverId: '',
-                  content: event.encrypted_payload,
-                  type: event.message_type as Message['type'],
-                  timestamp: event.timestamp,
-                  status: 'sent',
-                  reactions: [],
-                  isStarred: false,
-                  replyToId: event.reply_to_id ?? null,
-                  replyPreview: null,
-                  deletedAt: null,
-                  deletedBy: null,
-                  mediaEnvelope: null,
-                },
-                matchClientTempId: event.client_temp_id,
-              }),
-            );
-          }
-          return;
-        }
-        const peerKey = peerPublicKeyRef.current;
-        const ciphertext = event.encrypted_payload;
-        void (async () => {
-          let plaintext: string;
-          try {
-            plaintext = await decryptOrFallback(ciphertext, peerKey);
-          } catch (err) {
-            console.warn('[crypto] decrypt failed:', err);
-            plaintext = '🔒 Cannot decrypt';
-          }
-          const envelope = parseMediaEnvelope(plaintext);
-          const incoming: Message = {
-            id: event.message_id,
-            conversationId: event.conversation_id,
-            senderId: event.sender_id,
-            receiverId: '',
-            content: envelope ? mediaPlaceholder(envelope.mime) : plaintext,
-            type: effectiveType(event.message_type, envelope),
-            timestamp: event.timestamp,
-            status: 'sent',
-            reactions: [],
-            isStarred: false,
-            replyToId: event.reply_to_id ?? null,
-            replyPreview: null,
-            deletedAt: null,
-            deletedBy: null,
-            mediaEnvelope: envelope,
-          };
-          dispatch(upsertMessage({ message: incoming }));
-          void saveMessageLocal(
-            incoming.id,
-            incoming.conversationId,
-            incoming.senderId,
-            incoming.receiverId,
-            incoming.content,
-            incoming.type,
-            incoming.mediaUri,
-          );
-          // Videos download on tap (viewer), not automatically.
-          if (envelope && incoming.type !== 'video') {
-            hydrateMediaFor(incoming.id, envelope);
-          }
-        })();
+        void handleMessage(event);
+        return;
+      }
+      if (event.type === 'error') {
+        void outboxRef.current?.handleError(event);
+        return;
+      }
+      if (event.type === 'group_update') {
+        // Members / name changed: refresh (the outbox and header read it).
+        void dispatch(refreshConversationThunk(conversationId));
+        return;
+      }
+      if (event.type === 'access_revoked') {
+        void dispatch(refreshConversationThunk(conversationId));
+        onAccessRevokedRef.current?.();
         return;
       }
       if (event.type === 'presence') {
@@ -152,7 +166,8 @@ export function useChatSocket(
         );
       }
     },
-    [dispatch, peerPublicKeyRef, hydrateMediaFor],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dispatch, conversationId, hydrateMediaFor],
   );
 
   useEffect(() => {

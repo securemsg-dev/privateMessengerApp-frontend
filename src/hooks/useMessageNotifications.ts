@@ -4,10 +4,13 @@ import { useDispatch, useStore } from 'react-redux';
 import { AppDispatch, RootState } from '../store';
 import {
   applyMessageNotification,
+  cryptoConvOf,
   loadConversationsThunk,
   MessageType,
+  refreshConversationThunk,
 } from '../store/slices/chatSlice';
-import { decryptOrFallback, parseMediaEnvelope } from '../services/crypto';
+import { parseMediaEnvelope } from '../services/crypto';
+import { decryptFor } from '../services/conversationCrypto';
 import { voicePreviewText } from '../utils/waveform';
 import { userSocketBus } from '../services/userSocketBus';
 
@@ -42,6 +45,13 @@ export function useMessageNotifications() {
 
   useEffect(() => {
     const unsubscribe = userSocketBus.subscribe((event) => {
+      // Group membership/name changed, or we were added/removed: refetch
+      // that one conversation (it drops out of the list if we lost access).
+      if (event.type === 'conversation_update') {
+        const id = String(event.conversation_id ?? '');
+        if (id) void dispatch(refreshConversationThunk(id));
+        return;
+      }
       if (event.type !== 'message_notification') return;
 
       const conversationId = String(event.conversation_id ?? '');
@@ -64,16 +74,28 @@ export function useMessageNotifications() {
         return;
       }
 
+      const senderId = String(event.sender_id ?? '');
       void (async () => {
+        const myUserId = store.getState().auth.userId;
+        // 1:1 → peer key; groups → the sender's key from the event (or the
+        // member list); system lines → described, not decrypted.
+        const decrypt = () =>
+          decryptFor(
+            cryptoConvOf(conv),
+            {
+              payload: encryptedPayload,
+              messageType,
+              senderId,
+              senderPublicKey: (event.sender_public_key as string | undefined) ?? null,
+            },
+            myUserId,
+          );
         let preview: string;
         if (messageType === 'voice') {
           // Decrypt the envelope just to read the duration for "🎤 Voice · 0:12".
-          const plaintext = await decryptOrFallback(encryptedPayload, conv.contactPublicKey);
-          preview = voicePreviewText(parseMediaEnvelope(plaintext)?.durationMs);
+          preview = voicePreviewText(parseMediaEnvelope(await decrypt())?.durationMs);
         } else {
-          preview =
-            previewForType(messageType) ??
-            (await decryptOrFallback(encryptedPayload, conv.contactPublicKey));
+          preview = previewForType(messageType) ?? (await decrypt());
         }
         dispatch(
           applyMessageNotification({
@@ -81,6 +103,8 @@ export function useMessageNotifications() {
             preview,
             messageType,
             timestamp,
+            senderId,
+            senderName: (event.sender_name as string | undefined) ?? null,
           }),
         );
       })();

@@ -118,15 +118,19 @@ export const RootNavigator = () => {
   // Navigate to the relevant chat when the user taps a push notification.
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data as Record<string, string>;
-      const conversationId = data?.conversation_id;
-      const contactName = data?.contact_name ?? 'Chat';
-      const contactPrivateNumber = data?.contact_private_number ?? '';
+      const data = response.notification.request.content.data as Record<string, unknown>;
+      const conversationId = typeof data?.conversation_id === 'string' ? data.conversation_id : '';
+      const contactName = typeof data?.contact_name === 'string' ? data.contact_name : 'Chat';
+      const contactPrivateNumber =
+        typeof data?.contact_private_number === 'string' ? data.contact_private_number : '';
+      // Group pushes carry is_group; the chat screen fetches the member list.
+      const isGroup = data?.is_group === true || data?.is_group === 'true';
       if (!conversationId || !navigationRef.current?.isReady()) return;
       navigationRef.current.navigate('ChatScreen', {
         conversationId,
         contactName,
         contactPrivateNumber,
+        isGroup,
       });
     });
     return () => sub.remove();

@@ -329,13 +329,27 @@ export interface UserPublicDTO {
   show_online_status?: boolean;
 }
 
+export type WireMessageType = 'text' | 'voice' | 'image' | 'document' | 'video' | 'system';
+
 export interface LastMessagePreviewDTO {
   id: string;
   sender_id: string;
-  message_type: 'text' | 'voice' | 'image';
+  message_type: WireMessageType;
   encrypted_payload: string;
   created_at: string;
   self_destruct: boolean;
+  /** Groups: sender's name + key (they may have left the group). */
+  sender_display_name?: string | null;
+  sender_public_key?: string | null;
+}
+
+/** A group member as other members see them (no private number). */
+export interface GroupMemberDTO {
+  id: string;
+  display_name: string | null;
+  profile_picture_key: string | null;
+  public_key: string | null;
+  role: 'admin' | 'member';
 }
 
 export interface ConversationDTO {
@@ -346,6 +360,9 @@ export interface ConversationDTO {
   other_participant: UserPublicDTO | null;
   last_message: LastMessagePreviewDTO | null;
   unread_count: number;
+  /** Groups only: every current member (incl. me) and my role. */
+  participants?: GroupMemberDTO[] | null;
+  my_role?: 'admin' | 'member' | null;
   // Phase C.1 — caller's per-conversation prefs
   is_pinned: boolean;
   mute_until: string | null; // ISO8601 timestamp; null = not muted
@@ -361,15 +378,17 @@ export interface ReactionAggregateDTO {
 export interface MessageReplyPreviewDTO {
   id: string;
   sender_id: string;
-  message_type: 'text' | 'voice' | 'image';
+  message_type: WireMessageType;
   encrypted_payload: string;
+  sender_display_name?: string | null;
+  sender_public_key?: string | null;
 }
 
 export interface MessageDTO {
   id: string;
   conversation_id: string;
   sender_id: string;
-  message_type: 'text' | 'voice' | 'image';
+  message_type: WireMessageType;
   encrypted_payload: string;
   created_at: string;
   delivered_at: string | null;
@@ -383,6 +402,9 @@ export interface MessageDTO {
   // Phase C.3 — delete-for-everyone tombstone fields
   deleted_at: string | null;
   deleted_by: string | null;
+  /** Groups: sender's name + key. */
+  sender_display_name?: string | null;
+  sender_public_key?: string | null;
 }
 
 export interface MessagePageDTO {
@@ -501,9 +523,53 @@ export function createConversationApi(otherPrivateNumber: string): Promise<Conve
   });
 }
 
-/** GET /conversations — list all conversations the current user is part of. */
+/**
+ * GET /conversations — list all conversations the current user is part of.
+ * include_groups=true also marks this account as running a groups-capable
+ * build (so others can add it to groups); older backends ignore it.
+ */
 export function listConversationsApi(): Promise<ConversationDTO[]> {
-  return requestWithRefresh<ConversationDTO[]>('/conversations', { auth: true });
+  return requestWithRefresh<ConversationDTO[]>('/conversations?include_groups=true', { auth: true });
+}
+
+/** GET /conversations/{id} — one conversation (refresh after group changes). */
+export function getConversationApi(conversationId: string): Promise<ConversationDTO> {
+  return requestWithRefresh<ConversationDTO>(`/conversations/${conversationId}`, { auth: true });
+}
+
+/** POST /conversations/groups — create a group with some contacts. */
+export function createGroupApi(name: string, memberIds: string[]): Promise<ConversationDTO> {
+  return requestWithRefresh<ConversationDTO>('/conversations/groups', {
+    method: 'POST',
+    auth: true,
+    body: { name, member_ids: memberIds },
+  });
+}
+
+/** PATCH /conversations/{id} — rename a group (admins). */
+export function renameGroupApi(conversationId: string, name: string): Promise<ConversationDTO> {
+  return requestWithRefresh<ConversationDTO>(`/conversations/${conversationId}`, {
+    method: 'PATCH',
+    auth: true,
+    body: { name },
+  });
+}
+
+/** POST /conversations/{id}/members — add contacts (admins). */
+export function addGroupMembersApi(conversationId: string, memberIds: string[]): Promise<ConversationDTO> {
+  return requestWithRefresh<ConversationDTO>(`/conversations/${conversationId}/members`, {
+    method: 'POST',
+    auth: true,
+    body: { member_ids: memberIds },
+  });
+}
+
+/** DELETE /conversations/{id}/members/{userId} — remove (admins) or leave (self). */
+export function removeGroupMemberApi(conversationId: string, userId: string): Promise<void> {
+  return requestWithRefresh<void>(`/conversations/${conversationId}/members/${userId}`, {
+    method: 'DELETE',
+    auth: true,
+  });
 }
 
 /**

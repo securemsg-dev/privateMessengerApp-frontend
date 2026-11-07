@@ -10,9 +10,9 @@ import {
   setMessageStarred,
   upsertMessage,
 } from '../store/slices/chatSlice';
-import { Conversation } from '../store/slices/chatSlice';
+import { Conversation, cryptoConvOf, refreshConversationThunk } from '../store/slices/chatSlice';
 import { ChatSocket } from '../services/socket';
-import { encryptMessage } from '../services/crypto';
+import { encryptFor } from '../services/conversationCrypto';
 import { deleteMessageApi, starMessageApi, ApiError } from '../services/api';
 import { BubbleRect } from '../components/MessageActionSheet';
 
@@ -123,15 +123,21 @@ export function useMessageActions(
     const m = forwardingMessage;
     if (!m) return;
     setForwardingMessage(null);
-    let payload = m.content;
-    if (target.contactPublicKey) {
-      try {
-        payload = await encryptMessage(m.content, target.contactPublicKey);
-      } catch (err) {
-        Alert.alert("Couldn't forward", 'Encryption failed for the target conversation.');
-        console.warn('[forward] encrypt failed:', err);
-        return;
+    // E2EE is mandatory — never forward in plaintext. Groups are encrypted
+    // for a freshly fetched member list so the server accepts the frame.
+    let payload: string;
+    try {
+      let dest = target;
+      if (target.isGroup) {
+        const res = await dispatch(refreshConversationThunk(target.id)).unwrap();
+        if (!res.conversation) throw new Error('No longer a member');
+        dest = res.conversation;
       }
+      payload = await encryptFor(cryptoConvOf(dest), m.content);
+    } catch (err) {
+      Alert.alert("Couldn't forward", 'This message could not be encrypted for that chat.');
+      console.warn('[forward] encrypt failed:', err);
+      return;
     }
     const sock = new ChatSocket(target.id);
     sock.onState((state) => {

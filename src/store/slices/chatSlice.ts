@@ -6,13 +6,18 @@ import {
   deleteAllMessages,
 } from '../../services/database';
 import {
+  ConversationDTO,
   deleteConversationApi,
+  getConversationApi,
   listConversationsApi,
   listMessagesApi,
   MessageDTO,
 } from '../../services/api';
 import {
-  decryptOrFallback,
+  CryptoConv,
+  decryptFor,
+} from '../../services/conversationCrypto';
+import {
   MediaEnvelope,
   MediaMeta,
   parseMediaEnvelope,
@@ -52,12 +57,47 @@ export interface Conversation {
   unreadCount: number;
   isSelfChat: boolean;
 
+  // Groups — `contactName` holds the group name for display; the 1:1-only
+  // contact fields are empty.
+  isGroup?: boolean;
+  /** Current members incl. me (groups only). */
+  members?: GroupMember[];
+  myRole?: 'admin' | 'member' | null;
+  /** 1:1 only: the peer's user id (presence, safety). */
+  peerUserId?: string | null;
+  /** Who sent the last message (groups render "Name: preview"). */
+  lastMessageSenderId?: string | null;
+  lastMessageSenderName?: string | null;
+
   // Phase C.1 — per-user prefs (server-backed). Mirror backend
   // ConversationResponse so we can drop server snapshots straight in.
   isPinned: boolean;
   /** ISO8601; null = not muted. Treat any future timestamp as currently muted. */
   muteUntil: string | null;
   manualUnread: boolean;
+}
+
+export interface GroupMember {
+  userId: string;
+  displayName: string | null;
+  profilePictureKey: string | null;
+  publicKey: string | null;
+  role: 'admin' | 'member';
+}
+
+/** How to encrypt / decrypt for this conversation (see conversationCrypto). */
+export function cryptoConvOf(
+  conv: Conversation | undefined,
+  fallbackPeerKey: string | null = null,
+): CryptoConv {
+  if (conv?.isGroup) {
+    return {
+      isGroup: true,
+      peerPublicKey: null,
+      members: (conv.members ?? []).map((m) => ({ userId: m.userId, publicKey: m.publicKey })),
+    };
+  }
+  return { isGroup: false, peerPublicKey: conv?.contactPublicKey ?? fallbackPeerKey, members: [] };
 }
 
 /** One emoji's tally on a message — mirrors backend `ReactionAggregate`. */
@@ -73,6 +113,8 @@ export interface ReplyPreview {
   senderId: string;
   type: MessageType;
   content: string;
+  /** Groups: the original sender's name. */
+  senderName?: string | null;
 }
 
 export interface Message {
@@ -109,6 +151,8 @@ export interface Message {
    * the same fields on `mediaEnvelope` — read via `mediaMetaOf()`.
    */
   mediaMeta?: MediaMeta;
+  /** Groups: the sender's display name (bubbles are labelled). */
+  senderName?: string | null;
 }
 
 /** Display metadata for a media message, from whichever source has it. */
@@ -157,11 +201,103 @@ const isSelfChatId = (conversationId: string) =>
  * If the server is unreachable, the self-chat list still loads so the user
  * can keep using offline notes.
  */
+const formatNum = (n: string) =>
+  n.length === 10 ? `${n.slice(0, 2)} ${n.slice(2, 6)} ${n.slice(6, 10)}` : n;
+
+/** Chat-list preview text for a last message (decrypting when needed). */
+async function previewFor(
+  c: ConversationDTO,
+  crypto: CryptoConv,
+  myUserId: string | null,
+): Promise<string> {
+  const lastMsg = c.last_message;
+  if (!lastMsg) return '';
+  const type = lastMsg.message_type;
+  if (type === 'image') return '📷 Photo';
+  if (type === 'video') return '🎥 Video';
+  if (type === 'document') return '📎 Document';
+  const text = await decryptFor(
+    crypto,
+    {
+      payload: lastMsg.encrypted_payload,
+      messageType: type,
+      senderId: lastMsg.sender_id,
+      senderPublicKey: lastMsg.sender_public_key,
+    },
+    myUserId,
+  );
+  if (type === 'voice') return voicePreviewText(parseMediaEnvelope(text)?.durationMs);
+  return text;
+}
+
+/** Server conversation → app Conversation (decrypts the preview). */
+export async function conversationFromDTO(
+  c: ConversationDTO,
+  myUserId: string | null,
+): Promise<Conversation> {
+  const lastMsg = c.last_message;
+  const prefs = {
+    unreadCount: c.unread_count,
+    isSelfChat: false,
+    isPinned: c.is_pinned,
+    muteUntil: c.mute_until,
+    manualUnread: c.manual_unread,
+    lastMessageTime: lastMsg?.created_at || c.created_at,
+    lastMessageType: effectiveType(lastMsg?.message_type ?? 'text', null),
+    lastMessageSenderId: lastMsg?.sender_id ?? null,
+  };
+
+  if (c.is_group) {
+    const members: GroupMember[] = (c.participants ?? []).map((m) => ({
+      userId: m.id,
+      displayName: m.display_name,
+      profilePictureKey: m.profile_picture_key,
+      publicKey: m.public_key,
+      role: m.role,
+    }));
+    const conv: Conversation = {
+      id: c.id,
+      contactName: c.name || 'Group',
+      contactPrivateNumber: '',
+      contactProfilePictureKey: null,
+      contactPublicKey: null,
+      lastMessage: '',
+      ...prefs,
+      isGroup: true,
+      members,
+      myRole: c.my_role ?? null,
+      peerUserId: null,
+      lastMessageSenderName:
+        lastMsg?.sender_display_name ??
+        members.find((m) => m.userId === lastMsg?.sender_id)?.displayName ??
+        null,
+    };
+    conv.lastMessage = await previewFor(c, cryptoConvOf(conv), myUserId);
+    return conv;
+  }
+
+  const other = c.other_participant;
+  const peerKey = other?.public_key ?? null;
+  const conv: Conversation = {
+    id: c.id,
+    contactName:
+      other?.display_name || (other?.private_number ? formatNum(other.private_number) : ''),
+    contactPrivateNumber: other?.private_number || '',
+    contactProfilePictureKey: other?.profile_picture_key ?? null,
+    contactPublicKey: peerKey,
+    lastMessage: '',
+    ...prefs,
+    isGroup: false,
+    peerUserId: other?.id ?? null,
+    lastMessageSenderName: null,
+  };
+  conv.lastMessage = await previewFor(c, cryptoConvOf(conv), myUserId);
+  return conv;
+}
+
 export const loadConversationsThunk = createAsyncThunk<Conversation[]>(
   'chat/loadConversations',
-  async () => {
-    const formatNum = (n: string) =>
-      n.length === 10 ? `${n.slice(0, 2)} ${n.slice(2, 6)} ${n.slice(6, 10)}` : n;
+  async (_arg, { getState }) => {
 
     // 1. Self-chat from local SQLite
     const localRows = (await getConversations()) as Array<{
@@ -196,43 +332,8 @@ export const loadConversationsThunk = createAsyncThunk<Conversation[]>(
     let serverConvs: Conversation[] = [];
     try {
       const list = await listConversationsApi();
-      serverConvs = await Promise.all(
-        list.map<Promise<Conversation>>(async (c) => {
-          const other = c.other_participant;
-          const lastMsg = c.last_message;
-          const peerKey = other?.public_key ?? null;
-          const preview = lastMsg
-            ? lastMsg.message_type === 'text'
-              ? await decryptOrFallback(lastMsg.encrypted_payload, peerKey)
-              : lastMsg.message_type === 'voice'
-              ? voicePreviewText(
-                  parseMediaEnvelope(
-                    await decryptOrFallback(lastMsg.encrypted_payload, peerKey),
-                  )?.durationMs,
-                )
-              : lastMsg.message_type === 'image'
-              ? '📷 Photo'
-              : ''
-            : '';
-          return {
-            id: c.id,
-            contactName:
-              other?.display_name ||
-              (other?.private_number ? formatNum(other.private_number) : ''),
-            contactPrivateNumber: other?.private_number || '',
-            contactProfilePictureKey: other?.profile_picture_key ?? null,
-            contactPublicKey: peerKey,
-            lastMessage: preview,
-            lastMessageTime: lastMsg?.created_at || c.created_at,
-            lastMessageType: (lastMsg?.message_type as MessageType) || 'text',
-            unreadCount: c.unread_count,
-            isSelfChat: false,
-            isPinned: c.is_pinned,
-            muteUntil: c.mute_until,
-            manualUnread: c.manual_unread,
-          };
-        }),
-      );
+      const myUserId = (getState() as { auth: { userId: string | null } }).auth.userId;
+      serverConvs = await Promise.all(list.map((c) => conversationFromDTO(c, myUserId)));
       // Cache the freshly-loaded list for instant render next launch. Only on
       // success — a network failure leaves serverConvs empty and must not
       // clobber a good cache.
@@ -255,6 +356,29 @@ export const hydrateConversationsThunk = createAsyncThunk<Conversation[] | null>
 );
 
 /**
+ * Re-fetch one conversation (after a group_update / conversation_update).
+ * Resolves `null` when we no longer have access (removed from the group, or
+ * the group was deleted) so the caller can drop it.
+ */
+export const refreshConversationThunk = createAsyncThunk<
+  { id: string; conversation: Conversation | null },
+  string
+>('chat/refreshConversation', async (conversationId, { getState }) => {
+  const myUserId = (getState() as { auth: { userId: string | null } }).auth.userId;
+  try {
+    const dto = await getConversationApi(conversationId);
+    return { id: conversationId, conversation: await conversationFromDTO(dto, myUserId) };
+  } catch (err) {
+    const status = (err as { status?: number })?.status;
+    if (status === 403 || status === 404) {
+      void cacheSet(CACHE_KEYS.messages(conversationId), []);
+      return { id: conversationId, conversation: null };
+    }
+    throw err;
+  }
+});
+
+/**
  * Load message history for a conversation.
  *   - Self-chat (id starts with `self_`): purely local SQLite (drafts/notes
  *     never leave the device).
@@ -270,19 +394,37 @@ export const hydrateConversationsThunk = createAsyncThunk<Conversation[] | null>
  *  the initial page load and older-page pagination). */
 async function decryptServerMessage(
   m: MessageDTO,
-  peerPublicKey: string | null,
+  crypto: CryptoConv,
+  myUserId: string | null,
 ): Promise<Message> {
-  const decrypted = await decryptOrFallback(m.encrypted_payload, peerPublicKey);
   // After decrypt, the plaintext is either a normal text message or a JSON
-  // MediaEnvelope. We detect the latter and stash it; ChatScreen is
-  // responsible for downloading + decrypting the bytes off the critical path.
-  const envelope = parseMediaEnvelope(decrypted);
+  // MediaEnvelope (system messages come back already described). We detect
+  // media and stash the envelope; ChatScreen downloads the bytes off the
+  // critical path.
+  const decrypted = await decryptFor(
+    crypto,
+    {
+      payload: m.encrypted_payload,
+      messageType: m.message_type,
+      senderId: m.sender_id,
+      senderPublicKey: m.sender_public_key,
+    },
+    myUserId,
+  );
+  const envelope = m.message_type === 'system' ? null : parseMediaEnvelope(decrypted);
   const content = envelope ? mediaPlaceholder(envelope.mime) : decrypted;
 
   let replyPreview: ReplyPreview | null = null;
   if (m.reply_preview) {
-    const previewContent = await decryptOrFallback(
-      m.reply_preview.encrypted_payload, peerPublicKey,
+    const previewContent = await decryptFor(
+      crypto,
+      {
+        payload: m.reply_preview.encrypted_payload,
+        messageType: m.reply_preview.message_type,
+        senderId: m.reply_preview.sender_id,
+        senderPublicKey: m.reply_preview.sender_public_key,
+      },
+      myUserId,
     );
     const previewEnvelope = parseMediaEnvelope(previewContent);
     replyPreview = {
@@ -292,6 +434,7 @@ async function decryptServerMessage(
       content: previewEnvelope
         ? mediaPlaceholder(previewEnvelope.mime)
         : previewContent,
+      senderName: m.reply_preview.sender_display_name ?? null,
     };
   }
   return {
@@ -303,6 +446,7 @@ async function decryptServerMessage(
     type: effectiveType(m.message_type, envelope),
     mediaUri: undefined,
     timestamp: m.created_at,
+    // Groups have no per-message delivered/read state (read_at stays null).
     status: m.read_at ? 'read' : m.delivered_at ? 'delivered' : 'sent',
     reactions: m.reactions.map((r) => ({
       emoji: r.emoji,
@@ -315,15 +459,17 @@ async function decryptServerMessage(
     deletedAt: m.deleted_at,
     deletedBy: m.deleted_by,
     mediaEnvelope: envelope,
+    senderName: m.sender_display_name ?? null,
   };
 }
 
 export const loadMessagesThunk = createAsyncThunk<
   { messages: Message[]; nextCursor: string | null },
-  { conversationId: string; peerPublicKey: string | null }
+  { conversationId: string; crypto: CryptoConv }
 >(
   'chat/loadMessages',
-  async ({ conversationId, peerPublicKey }) => {
+  async ({ conversationId, crypto }, { getState }) => {
+    const myUserId = (getState() as { auth: { userId: string | null } }).auth.userId;
     if (isSelfChatId(conversationId)) {
       const rows = (await getMessagesByConversation(conversationId)) as Array<{
         id: string;
@@ -360,12 +506,12 @@ export const loadMessagesThunk = createAsyncThunk<
     }
 
     // Server: newest-first; reverse to oldest-first. Decrypt every message
-    // body — including our own (nacl.box's shared secret is symmetric, so
-    // (peerPubKey, mySecretKey) decrypts both directions).
+    // body — including our own (1:1: nacl.box's shared secret is symmetric;
+    // groups: senders wrap the message key for themselves too).
     const page = await listMessagesApi(conversationId);
     const ordered = page.messages.slice().reverse();
     const decrypted = await Promise.all(
-      ordered.map((m) => decryptServerMessage(m, peerPublicKey)),
+      ordered.map((m) => decryptServerMessage(m, crypto, myUserId)),
     );
     // Cache decrypted history (first page only) so re-opening paints instantly.
     void cacheSet(CACHE_KEYS.messages(conversationId), decrypted);
@@ -380,15 +526,16 @@ export const loadMessagesThunk = createAsyncThunk<
  */
 export const loadOlderMessagesThunk = createAsyncThunk<
   { conversationId: string; messages: Message[]; nextCursor: string | null },
-  { conversationId: string; peerPublicKey: string | null; before: string },
+  { conversationId: string; crypto: CryptoConv; before: string },
   { state: { chat: ChatState } }
 >(
   'chat/loadOlderMessages',
-  async ({ conversationId, peerPublicKey, before }) => {
+  async ({ conversationId, crypto, before }, { getState }) => {
+    const myUserId = (getState() as unknown as { auth: { userId: string | null } }).auth.userId;
     const page = await listMessagesApi(conversationId, { before });
     const ordered = page.messages.slice().reverse();
     const decrypted = await Promise.all(
-      ordered.map((m) => decryptServerMessage(m, peerPublicKey)),
+      ordered.map((m) => decryptServerMessage(m, crypto, myUserId)),
     );
     return {
       conversationId,
@@ -607,15 +754,20 @@ const chatSlice = createSlice({
         preview: string;
         messageType: MessageType;
         timestamp: string;
+        senderId?: string;
+        senderName?: string | null;
       }>,
     ) {
-      const { conversationId, preview, messageType, timestamp } = action.payload;
+      const { conversationId, preview, messageType, timestamp, senderId, senderName } = action.payload;
       const conv = state.conversations.find((c) => c.id === conversationId);
       if (!conv) return; // unknown conversation — hook triggers a list refresh
       conv.lastMessage = preview;
       conv.lastMessageType = messageType;
       conv.lastMessageTime = timestamp;
-      if (conversationId !== state.activeConversationId) {
+      conv.lastMessageSenderId = senderId ?? null;
+      conv.lastMessageSenderName = senderName ?? null;
+      // System lines ("Alice added Bob") don't count as unread.
+      if (conversationId !== state.activeConversationId && messageType !== 'system') {
         conv.unreadCount += 1;
       }
     },
@@ -728,6 +880,20 @@ const chatSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      .addCase(refreshConversationThunk.fulfilled, (state, action) => {
+        const { id, conversation } = action.payload;
+        const idx = state.conversations.findIndex((c) => c.id === id);
+        if (!conversation) {
+          if (idx >= 0) state.conversations.splice(idx, 1);
+          return;
+        }
+        if (idx >= 0) {
+          // Keep local-only state (e.g. unread bumped by live notifications).
+          state.conversations[idx] = { ...state.conversations[idx], ...conversation };
+        } else {
+          state.conversations.unshift(conversation);
+        }
+      })
       // loadConversations — payload is already a Conversation[]
       .addCase(loadConversationsThunk.pending, (state) => {
         state.status = 'loading';

@@ -11,6 +11,7 @@ export function useReadReceipts(
   senderId: string,
   isSelfChat: boolean | undefined,
   ackedReadRef: MutableRefObject<Set<string>>,
+  isGroup = false,
 ) {
   useEffect(() => {
     if (isSelfChat) return;
@@ -24,6 +25,7 @@ export function useReadReceipts(
     for (const m of messages) {
       if (
         m.senderId !== senderId &&
+        m.type !== 'system' &&
         m.status !== 'read' &&
         !ackedReadRef.current.has(m.id)
       ) {
@@ -31,8 +33,16 @@ export function useReadReceipts(
         unacked.push(m.id);
       }
     }
+    if (unacked.length === 0) return;
+    if (isGroup) {
+      // Groups keep a per-member read watermark server-side; acking the
+      // newest message moves it past everything before. (Group messages
+      // never become 'read' locally, so the ack set is what dedupes.)
+      sock.send({ type: 'read', message_ids: [unacked[unacked.length - 1]] });
+      return;
+    }
     for (let i = 0; i < unacked.length; i += MAX_BATCH) {
       sock.send({ type: 'read', message_ids: unacked.slice(i, i + MAX_BATCH) });
     }
-  }, [messages, senderId, isSelfChat, socketRef, ackedReadRef]);
+  }, [messages, senderId, isSelfChat, socketRef, ackedReadRef, isGroup]);
 }

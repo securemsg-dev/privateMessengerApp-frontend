@@ -37,10 +37,13 @@ export const ForwardSheet = ({ visible, excludeIds, onClose, onPick }: Props) =>
   const conversations = useSelector((s: RootState) => s.chat.conversations);
   const exclude = new Set(excludeIds ?? []);
 
-  // Forwarding to self-chat or unreachable peers (no public_key) makes no
-  // sense for the messaging spine, so they're filtered out here.
+  // Only chats we can encrypt for: 1:1 peers with a public key, and groups
+  // whose member list is known. Self-chat is local-only.
   const targets = conversations.filter(
-    (c) => !c.isSelfChat && !exclude.has(c.id) && !!c.contactPublicKey,
+    (c) =>
+      !c.isSelfChat &&
+      !exclude.has(c.id) &&
+      (c.isGroup ? (c.members?.length ?? 0) > 0 : !!c.contactPublicKey),
   );
 
   return (

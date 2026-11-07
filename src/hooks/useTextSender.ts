@@ -7,17 +7,16 @@ import {
   sendMessageThunk,
   updateMessageStatus,
 } from '../store/slices/chatSlice';
-import { ChatSocket } from '../services/socket';
-import { encryptMessage } from '../services/crypto';
 import { ReplyContext } from '../components/QuoteBar';
+import { Outbox } from '../services/outbox';
+import { encryptionErrorText } from '../services/conversationCrypto';
 
 export function useTextSender(
   conversationId: string,
   senderId: string,
   contactPrivateNumber: string,
   isSelfChat: boolean | undefined,
-  socketRef: MutableRefObject<ChatSocket | null>,
-  peerPublicKeyRef: MutableRefObject<string | null>,
+  outboxRef: MutableRefObject<Outbox | null>,
   dispatch: AppDispatch,
   replyTo: ReplyContext | null,
   dismissReply: () => void,
@@ -45,6 +44,7 @@ export function useTextSender(
           senderId: replyTarget.senderId,
           type: replyTarget.type,
           content: replyTarget.content,
+          senderName: replyTarget.senderName ?? null,
         }
       : null;
 
@@ -63,34 +63,18 @@ export function useTextSender(
     if (!isSelfChat) {
       void (async () => {
         // E2EE is mandatory: never fall back to plaintext over the wire.
-        const peerKey = peerPublicKeyRef.current;
-        if (!peerKey) {
-          dispatch(updateMessageStatus({ id: localId, status: 'failed' }));
-          Alert.alert(
-            'Message not sent',
-            "This contact's encryption key isn't available yet. Check your connection and try again.",
-          );
-          return;
-        }
-        let payload: string;
+        const outbox = outboxRef.current;
         try {
-          payload = await encryptMessage(trimmed, peerKey);
+          if (!outbox) throw undefined;
+          await outbox.send(localId, trimmed, {
+            message_type: 'text',
+            reply_to_id: replyPreview?.id,
+          });
         } catch (err) {
           if (__DEV__) console.warn('[crypto] encrypt failed; not sending:', err);
           dispatch(updateMessageStatus({ id: localId, status: 'failed' }));
-          Alert.alert(
-            'Message not sent',
-            'The message could not be encrypted, so it was not sent.',
-          );
-          return;
+          Alert.alert('Message not sent', encryptionErrorText(err, !!outbox?.isGroup()));
         }
-        socketRef.current?.send({
-          type: 'message',
-          message_type: 'text',
-          encrypted_payload: payload,
-          client_temp_id: localId,
-          reply_to_id: replyPreview?.id,
-        });
       })();
     }
     setText('');

@@ -32,6 +32,9 @@ export interface ServerMessageEvent {
   self_destruct: boolean;
   reply_to_id?: string | null;
   timestamp: string;
+  /** Groups: who sent it and the key that decrypts it. */
+  sender_display_name?: string | null;
+  sender_public_key?: string | null;
 }
 
 export interface ServerReceiptEvent {
@@ -66,6 +69,25 @@ export interface ServerDeletionEvent {
 export interface ServerErrorEvent {
   type: 'error';
   detail: string;
+  /** Machine-readable reason, e.g. 'group_members_changed', 'not_a_member'. */
+  code?: string;
+  /** Set when the error is about one specific outgoing message. */
+  client_temp_id?: string;
+}
+
+/** Group membership / name changed — refetch the conversation. */
+export interface ServerGroupUpdateEvent {
+  type: 'group_update';
+  conversation_id: string;
+}
+
+/**
+ * Synthetic (client-side) event: the server closed this socket with 4403 —
+ * we're no longer a member (removed from the group, or it was deleted).
+ */
+export interface AccessRevokedEvent {
+  type: 'access_revoked';
+  conversation_id: string;
 }
 
 /** Peer online / last seen (only sent to sockets opened with presence=1). */
@@ -83,7 +105,9 @@ export type ServerEvent =
   | ServerReactionEvent
   | ServerDeletionEvent
   | ServerErrorEvent
-  | ServerPresenceEvent;
+  | ServerPresenceEvent
+  | ServerGroupUpdateEvent
+  | AccessRevokedEvent;
 
 // ── Wire types — client → server ─────────────────────────────────────────────
 
@@ -136,6 +160,8 @@ type StateListener = (state: ConnectionState) => void;
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 const POLICY_VIOLATION = 1008;
+/** Not (or no longer) a member — final, never reconnect. */
+const ACCESS_REVOKED = 4403;
 
 export class ChatSocket {
   private ws: WebSocket | null = null;
@@ -267,6 +293,12 @@ export class ChatSocket {
       this.setState('closed');
       if (this.explicitlyClosed) return;
 
+      if (ev.code === ACCESS_REVOKED) {
+        this.explicitlyClosed = true;
+        this.emitLocal({ type: 'access_revoked', conversation_id: this.conversationId });
+        return;
+      }
+
       // Token likely expired → refresh once, then reconnect immediately.
       // Subsequent failures fall through to backoff.
       if (ev.code === POLICY_VIOLATION && !this.refreshAttempted) {
@@ -288,6 +320,16 @@ export class ChatSocket {
       void this.openSocket();
     } catch {
       this.scheduleReconnect();
+    }
+  }
+
+  private emitLocal(event: ServerEvent): void {
+    for (const l of this.listeners) {
+      try {
+        l(event);
+      } catch (err) {
+        console.warn('[ChatSocket] listener threw', err);
+      }
     }
   }
 

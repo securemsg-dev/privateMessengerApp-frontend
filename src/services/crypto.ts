@@ -270,6 +270,129 @@ export async function decryptOrFallback(
   return decrypted ?? '🔒 Cannot decrypt';
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Group messages (envelope v2)
+//
+// A fresh random message key encrypts the payload ONCE (nacl.secretbox);
+// that key is then wrapped for every member — the sender included, so their
+// own history stays readable — with nacl.box(senderSecret, memberPublic):
+//
+//   { v: 2, n: <b64 nonce>, c: <b64 secretbox(plaintext)>,
+//     k: { <userId>: <b64(wrapNonce ‖ box(messageKey))> } }
+//
+// ~140 bytes per member. The server checks that `k` names exactly the
+// current members (it can read the ids, never the keys or content).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface GroupRecipient {
+  userId: string;
+  /** Base64 Curve25519 public key. */
+  publicKey: string | null;
+}
+
+interface GroupEnvelope {
+  v: 2;
+  n: string;
+  c: string;
+  k: Record<string, string>;
+}
+
+function isGroupEnvelopeObj(x: unknown): x is GroupEnvelope {
+  if (!x || typeof x !== 'object') return false;
+  const e = x as Record<string, unknown>;
+  return (
+    e.v === 2 &&
+    typeof e.n === 'string' &&
+    typeof e.c === 'string' &&
+    !!e.k &&
+    typeof e.k === 'object'
+  );
+}
+
+/** Cheap check before parsing: is this a v2 group envelope? */
+export function isGroupEnvelope(payload: string): boolean {
+  if (!payload.startsWith('{') || !payload.includes('"v":2')) return false;
+  try {
+    return isGroupEnvelopeObj(JSON.parse(payload));
+  } catch {
+    return false;
+  }
+}
+
+export class MissingRecipientKeyError extends Error {
+  constructor(public readonly userId: string) {
+    super(`Member ${userId} has no encryption key`);
+  }
+}
+
+/** Encrypt once for many recipients. Throws if any recipient lacks a key. */
+export async function encryptGroupMessage(
+  plaintext: string,
+  recipients: GroupRecipient[],
+): Promise<string> {
+  const myPair = await getKeyPair();
+  const myPriv = naclUtil.decodeBase64(myPair.secretKey);
+  const messageKey = nacl.randomBytes(nacl.secretbox.keyLength);
+  const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+  const cipher = nacl.secretbox(naclUtil.decodeUTF8(plaintext), nonce, messageKey);
+
+  const k: Record<string, string> = {};
+  for (const r of recipients) {
+    if (!r.publicKey) throw new MissingRecipientKeyError(r.userId);
+    const wrapNonce = nacl.randomBytes(nacl.box.nonceLength);
+    const wrapped = nacl.box(messageKey, wrapNonce, naclUtil.decodeBase64(r.publicKey), myPriv);
+    const packed = new Uint8Array(wrapNonce.length + wrapped.length);
+    packed.set(wrapNonce, 0);
+    packed.set(wrapped, wrapNonce.length);
+    k[r.userId] = naclUtil.encodeBase64(packed);
+  }
+  const envelope: GroupEnvelope = {
+    v: 2,
+    n: naclUtil.encodeBase64(nonce),
+    c: naclUtil.encodeBase64(cipher),
+    k,
+  };
+  return JSON.stringify(envelope);
+}
+
+/**
+ * Decrypt a v2 envelope addressed to `myUserId`, sent by the holder of
+ * `senderPublicKeyB64`. Returns null when it wasn't wrapped for us (e.g. sent
+ * before we joined), the sender key is wrong, or anything was tampered with.
+ */
+export async function decryptGroupMessage(
+  envelopeJson: string,
+  myUserId: string,
+  senderPublicKeyB64: string,
+): Promise<string | null> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(envelopeJson);
+  } catch {
+    return null;
+  }
+  if (!isGroupEnvelopeObj(parsed)) return null;
+  const entry = parsed.k[myUserId];
+  if (typeof entry !== 'string') return null;
+  try {
+    const myPair = await getKeyPair();
+    const myPriv = naclUtil.decodeBase64(myPair.secretKey);
+    const packed = naclUtil.decodeBase64(entry);
+    const wrapNonce = packed.subarray(0, nacl.box.nonceLength);
+    const wrapped = packed.subarray(nacl.box.nonceLength);
+    const messageKey = nacl.box.open(
+      wrapped, wrapNonce, naclUtil.decodeBase64(senderPublicKeyB64), myPriv,
+    );
+    if (!messageKey) return null;
+    const plain = nacl.secretbox.open(
+      naclUtil.decodeBase64(parsed.c), naclUtil.decodeBase64(parsed.n), messageKey,
+    );
+    return plain ? naclUtil.encodeUTF8(plain) : null;
+  } catch {
+    return null;
+  }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Media (Phase D) — symmetric encryption for blobs + a structured "media"

@@ -15,7 +15,9 @@ export function useReplyContext(
   const handleReply = useCallback(
     (m: Message) => {
       const senderName =
-        m.senderId === senderId ? displayName || 'yourself' : contactName || 'them';
+        m.senderId === senderId
+          ? displayName || 'yourself'
+          : m.senderName || contactName || 'them';
       setReplyTo({
         senderName,
         preview: m.content,

@@ -8,6 +8,10 @@ import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 
 import {
+  decryptGroupMessage,
+  encryptGroupMessage,
+  isGroupEnvelope,
+  MissingRecipientKeyError,
   decryptBytes,
   decryptMessage,
   decryptOrFallback,
@@ -180,5 +184,84 @@ describe('parseMediaEnvelope', () => {
       }),
     );
     expect(parsed).toEqual(valid);
+  });
+});
+
+
+describe('group messages (envelope v2)', () => {
+  const bob = nacl.box.keyPair();
+  const carol = nacl.box.keyPair();
+  const b64 = naclUtil.encodeBase64;
+
+  /** Open a v2 envelope as a raw member (secret key in hand). */
+  const openAs = (envelopeJson: string, userId: string, secret: Uint8Array, senderPub: Uint8Array) => {
+    const env = JSON.parse(envelopeJson);
+    const packed = naclUtil.decodeBase64(env.k[userId]);
+    const key = nacl.box.open(packed.subarray(24), packed.subarray(0, 24), senderPub, secret);
+    if (!key) return null;
+    const plain = nacl.secretbox.open(naclUtil.decodeBase64(env.c), naclUtil.decodeBase64(env.n), key);
+    return plain ? naclUtil.encodeUTF8(plain) : null;
+  };
+
+  it('wraps one message key per member, including the sender', async () => {
+    const me = await getPublicKey();
+    const json = await encryptGroupMessage('hi group 👋', [
+      { userId: 'me', publicKey: me },
+      { userId: 'bob', publicKey: b64(bob.publicKey) },
+      { userId: 'carol', publicKey: b64(carol.publicKey) },
+    ]);
+    expect(isGroupEnvelope(json)).toBe(true);
+    expect(Object.keys(JSON.parse(json).k).sort()).toEqual(['bob', 'carol', 'me']);
+
+    const myPub = naclUtil.decodeBase64(me);
+    expect(openAs(json, 'bob', bob.secretKey, myPub)).toBe('hi group 👋');
+    expect(openAs(json, 'carol', carol.secretKey, myPub)).toBe('hi group 👋');
+    // Sender reads their own message back (history on any device).
+    expect(await decryptGroupMessage(json, 'me', me)).toBe('hi group 👋');
+  });
+
+  it('decrypts a message another member sent to us', async () => {
+    const me = await getPublicKey();
+    const messageKey = nacl.randomBytes(32);
+    const n = nacl.randomBytes(24);
+    const wn = nacl.randomBytes(24);
+    const wrapped = nacl.box(messageKey, wn, naclUtil.decodeBase64(me), bob.secretKey);
+    const packed = new Uint8Array(24 + wrapped.length);
+    packed.set(wn, 0);
+    packed.set(wrapped, 24);
+    const json = JSON.stringify({
+      v: 2,
+      n: b64(n),
+      c: b64(nacl.secretbox(naclUtil.decodeUTF8('from bob'), n, messageKey)),
+      k: { me: b64(packed) },
+    });
+    expect(await decryptGroupMessage(json, 'me', b64(bob.publicKey))).toBe('from bob');
+    // Wrong sender key → can't unwrap.
+    expect(await decryptGroupMessage(json, 'me', b64(carol.publicKey))).toBeNull();
+  });
+
+  it('returns null for non-members and tampered payloads', async () => {
+    const me = await getPublicKey();
+    const json = await encryptGroupMessage('secret', [
+      { userId: 'me', publicKey: me },
+      { userId: 'bob', publicKey: b64(bob.publicKey) },
+    ]);
+    expect(await decryptGroupMessage(json, 'carol', me)).toBeNull(); // not wrapped for carol
+    const env = JSON.parse(json);
+    env.c = b64(nacl.randomBytes(naclUtil.decodeBase64(env.c).length));
+    expect(await decryptGroupMessage(JSON.stringify(env), 'me', me)).toBeNull();
+    expect(await decryptGroupMessage('{"v":1,"n":"x","c":"y"}', 'me', me)).toBeNull();
+    expect(await decryptGroupMessage('not json', 'me', me)).toBeNull();
+  });
+
+  it('refuses to encrypt when a member has no key', async () => {
+    await expect(
+      encryptGroupMessage('x', [{ userId: 'bob', publicKey: null }]),
+    ).rejects.toBeInstanceOf(MissingRecipientKeyError);
+  });
+
+  it('is not mistaken for a 1:1 envelope', () => {
+    expect(isGroupEnvelope('{"v":1,"n":"a","c":"b"}')).toBe(false);
+    expect(isGroupEnvelope('hello')).toBe(false);
   });
 });
