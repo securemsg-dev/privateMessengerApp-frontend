@@ -33,6 +33,10 @@ interface Props {
   isMine: boolean;
   senderId: string;
   contactName: string;
+  /** Group chat bubble rules (sender label, no read ticks). */
+  isGroup?: boolean;
+  /** First message in a run from this sender → show their name. */
+  showSenderName?: boolean;
   colors: Colors;
   messages: Message[];
   onLongPress: (m: Message, isSent: boolean, node: View) => void;
@@ -55,6 +59,14 @@ const sameDay = (a?: string, b?: string) => {
   );
 };
 
+/** Stable per-sender label colour in groups. */
+const SENDER_COLORS = ['#e17055', '#0984e3', '#00a085', '#d63384', '#6c5ce7', '#e1a400', '#16a2b8', '#c0392b'];
+export const senderColor = (id: string) => {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return SENDER_COLORS[Math.abs(h) % SENDER_COLORS.length];
+};
+
 const DaySeparator = ({ label, colors }: { label: string; colors: Colors }) => (
   <View style={styles.dayWrap}>
     <Text style={[styles.dayLabel, { color: colors.textSecondary }]}>
@@ -70,6 +82,8 @@ export const MessageBubble = React.memo(
     isMine,
     senderId,
     contactName,
+    isGroup,
+    showSenderName,
     colors,
     messages,
     onLongPress,
@@ -241,8 +255,30 @@ export const MessageBubble = React.memo(
       return <Text style={[styles.bubbleText, { color: textColor }]}>{item.content}</Text>;
     };
 
+    // Group events ("Alice added Bob"): a centred line, no bubble/actions.
+    if (item.type === 'system') {
+      return (
+        <View>
+          <View style={styles.systemWrap}>
+            <Text style={[styles.systemText, { color: colors.textSecondary, backgroundColor: colors.surface }]}>
+              {item.content}
+            </Text>
+          </View>
+          {showDay && dayLabel && <DaySeparator label={dayLabel} colors={colors} />}
+        </View>
+      );
+    }
+
     return (
       <View>
+        {showSenderName && (
+          <Text
+            numberOfLines={1}
+            style={[styles.senderLabel, { color: senderColor(item.senderId) }]}
+          >
+            {item.senderName || 'Member'}
+          </Text>
+        )}
         <SwipeableMessage isSent={isMine} onReply={() => onReply(item)}>
           <Pressable
             ref={(node) => {
@@ -283,7 +319,11 @@ export const MessageBubble = React.memo(
                     { color: isMine ? 'rgba(255,255,255,0.85)' : colors.primary },
                   ]}
                 >
-                  {replyPreview.senderId === senderId ? 'You' : contactName}
+                  {replyPreview.senderId === senderId
+                    ? 'You'
+                    : isGroup
+                    ? replyPreview.senderName || 'Member'
+                    : contactName}
                 </Text>
                 <Text
                   numberOfLines={2}
@@ -355,7 +395,9 @@ export const MessageBubble = React.memo(
         <View style={[styles.metaRow, isMine ? styles.metaRight : styles.metaLeft]}>
           <Text style={[styles.metaText, { color: colors.textSecondary }]}>
             {formatBubbleTime(item.timestamp)}
-            {isMine && (
+            {/* Groups have no per-member delivered/read ticks — only show
+                a problem (NOT SENT). */}
+            {isMine && (!isGroup || item.status === 'failed') && (
               <>
                 {'  ·  '}
                 <Text

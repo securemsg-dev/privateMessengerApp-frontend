@@ -42,6 +42,9 @@ interface Props {
   onReact: (emoji: string) => void;
   /** "+" at the end of the strip — opens the full emoji picker for this message. */
   onMoreReactions: () => void;
+  /** Groups: report / block whoever sent this (shown on others' messages). */
+  onReportSender?: () => void;
+  onBlockSender?: () => void;
 }
 
 interface MenuItemProps {
@@ -65,6 +68,8 @@ export const MessageActionSheet = ({
   onDelete,
   onReact,
   onMoreReactions,
+  onReportSender,
+  onBlockSender,
 }: Props) => {
   const { colors } = useTheme();
   const opacity = useRef(new Animated.Value(0)).current;
@@ -304,6 +309,10 @@ export const MessageActionSheet = ({
             label: 'Star message',
             onPress: onStar,
           })}
+          {!isSent && onReportSender &&
+            renderMenuItem({ icon: 'flag-outline', label: 'Report', onPress: onReportSender })}
+          {!isSent && onBlockSender &&
+            renderMenuItem({ icon: 'ban-outline', label: 'Block sender', onPress: onBlockSender })}
           <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
           {renderMenuItem({
             icon: 'trash-outline',

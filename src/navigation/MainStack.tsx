@@ -6,6 +6,7 @@ import { ProfileScreen } from '../screens/Main/ProfileScreen';
 import { StartChatScreen } from '../screens/Main/StartChatScreen';
 import { ChatScreen } from '../screens/Main/ChatScreen';
 import { CreateGroupScreen } from '../screens/Main/CreateGroupScreen';
+import { GroupInfoScreen } from '../screens/Main/GroupInfoScreen';
 import { ChangePasswordScreen } from '../screens/Main/ChangePasswordScreen';
 import { BlockedUsersScreen } from '../screens/Main/BlockedUsersScreen';
 
@@ -14,13 +15,17 @@ export type MainStackParamList = {
   Profile: undefined;
   ChangePassword: undefined;
   StartChat: undefined;
-  CreateGroup: undefined;
+  /** With addToConversationId: add contacts to an existing group. */
+  CreateGroup: { addToConversationId?: string } | undefined;
+  GroupInfo: { conversationId: string };
   BlockedUsers: undefined;
   ChatScreen: {
     conversationId: string;
     contactName: string;
     contactPrivateNumber: string;
     isSelfChat?: boolean;
+    contactPublicKey?: string | null;
+    isGroup?: boolean;
   };
 };
 
@@ -40,6 +45,7 @@ export const MainStack = () => {
       <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
       <Stack.Screen name="StartChat" component={StartChatScreen} />
       <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
+      <Stack.Screen name="GroupInfo" component={GroupInfoScreen} />
       <Stack.Screen name="ChatScreen" component={ChatScreen} />
       <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
     </Stack.Navigator>

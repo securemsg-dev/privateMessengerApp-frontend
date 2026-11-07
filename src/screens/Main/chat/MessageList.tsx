@@ -19,6 +19,8 @@ interface Props {
   messages: Message[];
   senderId: string;
   contactName: string;
+  /** Group chat: label senders, render system lines, no read ticks. */
+  isGroup?: boolean;
   colors: Colors;
   isSelfChat: boolean | undefined;
   onReply: (m: Message) => void;
@@ -49,6 +51,7 @@ export const MessageList = ({
   messages,
   senderId,
   contactName,
+  isGroup,
   colors,
   isSelfChat,
   onReply,
@@ -57,9 +60,17 @@ export const MessageList = ({
   onLoadOlder,
   loadingOlder,
 }: Props) => {
+  const reversed = React.useMemo(() => [...messages].reverse(), [messages]);
   const renderItem = useCallback(
     ({ item, index }: { item: Message; index: number }) => {
       const isMine = item.senderId === senderId;
+      // Inverted list: the chronologically previous message is index + 1.
+      const prev = reversed[index + 1];
+      const showSenderName =
+        !!isGroup &&
+        !isMine &&
+        item.type !== 'system' &&
+        (!prev || prev.senderId !== item.senderId || prev.type === 'system');
       return (
         <MessageBubble
           item={item}
@@ -67,6 +78,8 @@ export const MessageList = ({
           isMine={isMine}
           senderId={senderId}
           contactName={contactName}
+          isGroup={!!isGroup}
+          showSenderName={showSenderName}
           colors={colors}
           messages={messages}
           onLongPress={(m, isSent, rect) => onActionSheet(m, isSent, rect as unknown as BubbleRect)}
@@ -75,7 +88,7 @@ export const MessageList = ({
         />
       );
     },
-    [senderId, contactName, colors, messages, onReply, onActionSheet, onOpenMedia],
+    [senderId, contactName, isGroup, reversed, colors, messages, onReply, onActionSheet, onOpenMedia],
   );
 
   // The list is inverted, so the "footer" renders at the TOP of the thread —
@@ -88,7 +101,7 @@ export const MessageList = ({
 
   return (
     <FlatList
-      data={[...messages].reverse()}
+      data={reversed}
       keyExtractor={(item) => item.id}
       renderItem={renderItem}
       inverted

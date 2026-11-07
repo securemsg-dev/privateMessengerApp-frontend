@@ -103,3 +103,29 @@ describe('buildReportBody consent gate', () => {
     expect(body.reason).toBe('harassment');
   });
 });
+
+
+describe('buildEvidence in groups', () => {
+  const msg = (id: string, senderId: string, content: string, type = 'text') => ({
+    id, senderId, content, type, timestamp: `2026-11-0${id}T00:00:00Z`, deletedAt: null,
+  });
+
+  it("only includes the reported member's messages", () => {
+    const evidence = buildEvidence(
+      [
+        msg('1', 'bob', 'from bob'),
+        msg('2', 'carol', 'from carol'),
+        msg('3', 'me', 'mine'),
+        msg('4', 'bob', 'bob again'),
+      ],
+      'me',
+      'bob',
+    );
+    expect(evidence.map((e) => e.content)).toEqual(['from bob', 'bob again']);
+  });
+
+  it('never includes system lines', () => {
+    const evidence = buildEvidence([msg('1', 'bob', 'Bob added Eve', 'system')], 'me', 'bob');
+    expect(evidence).toEqual([]);
+  });
+});

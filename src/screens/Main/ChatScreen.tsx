@@ -1,5 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Keyboard,
   KeyboardAvoidingView,
   NativeSyntheticEvent,
@@ -31,7 +32,15 @@ import { ChatOverflowMenu } from '../../components/ChatOverflowMenu';
 import { ReportSheet } from '../../components/ReportSheet';
 import { EmojiPickerSheet } from '../../components/EmojiPickerSheet';
 import { MediaViewerModal, MediaViewerItem } from '../../components/MediaViewerModal';
-import { hydrateMessageMedia, mediaMetaOf, Message } from '../../store/slices/chatSlice';
+import {
+  cryptoConvOf,
+  hydrateMessageMedia,
+  mediaMetaOf,
+  Message,
+  refreshConversationThunk,
+} from '../../store/slices/chatSlice';
+import { CryptoConv, NO_CRYPTO } from '../../services/conversationCrypto';
+import { Outbox } from '../../services/outbox';
 import { downloadAndDecryptMedia } from '../../services/media';
 import { insertAtSelection, Selection } from '../../utils/textInsert';
 import { useCall } from '../../components/CallProvider';
@@ -48,6 +57,7 @@ import { useMediaPicker } from '../../hooks/useMediaPicker';
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder';
 import { useMessageActions } from '../../hooks/useMessageActions';
 import { useChatSafety } from '../../hooks/useChatSafety';
+import { useMemberSafety } from '../../hooks/useMemberSafety';
 
 import { ChatHeader } from './chat/ChatHeader';
 import { MessageList } from './chat/MessageList';
@@ -64,6 +74,7 @@ type ChatScreenParams = {
     contactPrivateNumber: string;
     isSelfChat?: boolean;
     contactPublicKey?: string | null;
+    isGroup?: boolean;
   };
 };
 
@@ -81,6 +92,7 @@ export const ChatScreen = () => {
     contactPrivateNumber,
     isSelfChat,
     contactPublicKey: initialPeerKey,
+    isGroup: isGroupParam,
   } = route.params;
 
   const userId = useSelector((s: RootState) => s.auth.userId);
@@ -96,14 +108,29 @@ export const ChatScreen = () => {
     s.chat.conversations.find((c) => c.id === conversationId),
   );
 
+  const isGroup = !!(isGroupParam || conv?.isGroup);
+  // Group name can change while open (rename) — prefer the live value.
+  const chatTitle = isGroup ? conv?.contactName || contactName : contactName;
+
   const senderId = userId || privateNumber || 'local';
-  const firstName = (contactName || '').split(' ')[0] || 'there';
+  const firstName = isGroup ? chatTitle : (contactName || '').split(' ')[0] || 'there';
 
   const { startOutgoingCall } = useCall();
   const handleCallPress = () => {
     if (isSelfChat) return;
+    if (isGroup) {
+      Alert.alert('Group call', 'Group calling — to be continued.');
+      return;
+    }
     void startOutgoingCall({ name: contactName, number: contactPrivateNumber, conversationId });
   };
+  const openGroupInfo = () => navigation.navigate('GroupInfo', { conversationId });
+
+  // Groups opened from a push / before the list loaded have no member list
+  // yet — fetch it (needed to encrypt and to label senders).
+  useEffect(() => {
+    if (isGroup && !conv?.members?.length) void dispatch(refreshConversationThunk(conversationId));
+  }, [isGroup, conversationId, conv?.members?.length, dispatch]);
 
   // Attachment tray
   const [trayOpen, setTrayOpen] = useState(false);
@@ -127,7 +154,7 @@ export const ChatScreen = () => {
   const handleOpenMedia = (m: Message) => {
     const base = {
       key: m.id,
-      title: m.senderId === senderId ? 'You' : contactName,
+      title: m.senderId === senderId ? 'You' : m.senderName || contactName,
       timestamp: m.timestamp,
       mime: m.mediaEnvelope?.mime,
     };
@@ -168,25 +195,47 @@ export const ChatScreen = () => {
   };
 
   // Hooks — dependency order matches plan phases 1-3
-  const { peerPublicKey, peerPublicKeyRef } = usePeerKeyLookup(
-    contactPrivateNumber, isSelfChat, initialPeerKey,
+  // 1:1 key lookup (skipped for self-chat and groups).
+  const { peerPublicKey } = usePeerKeyLookup(
+    contactPrivateNumber, isSelfChat || isGroup, initialPeerKey,
   );
+  // How this chat encrypts/decrypts — 1:1 peer key or the group member list.
+  const crypto: CryptoConv = useMemo(
+    () => (isSelfChat ? NO_CRYPTO : cryptoConvOf(conv, peerPublicKey)),
+    [isSelfChat, conv, peerPublicKey],
+  );
+  const cryptoRef = useRef<CryptoConv>(crypto);
+  cryptoRef.current = crypto;
+  const outboxRef = useRef<Outbox | null>(null);
+
   const { hydrateMediaFor } = useMediaHydration(dispatch, messages);
   const { socketRef, senderIdRef, ackedReadRef } = useChatSocket(
-    conversationId, isSelfChat, senderId, peerPublicKeyRef, dispatch, hydrateMediaFor,
+    conversationId, isSelfChat, senderId, cryptoRef, outboxRef, dispatch, hydrateMediaFor,
+    () => {
+      Alert.alert("You're no longer in this group", 'You were removed or the group was deleted.');
+      navigation.goBack();
+    },
   );
-  useReadReceipts(socketRef, messages, senderId, isSelfChat, ackedReadRef);
+  if (!outboxRef.current) {
+    outboxRef.current = new Outbox({
+      conversationId,
+      dispatch,
+      socket: () => socketRef.current,
+      crypto: () => cryptoRef.current,
+    });
+  }
+  useReadReceipts(socketRef, messages, senderId, isSelfChat, ackedReadRef, isGroup);
 
   const { replyTo, handleReply, dismissReply } = useReplyContext(
-    messages, senderId, displayName, contactName, textInputRef,
+    messages, senderId, displayName, isGroup ? '' : contactName, textInputRef,
   );
   useStopVoiceOnUnmount();
   const { sendMediaAsset } = useMediaSender(
-    conversationId, senderId, contactPrivateNumber, isSelfChat, socketRef, peerPublicKeyRef, dispatch,
+    conversationId, senderId, contactPrivateNumber, isSelfChat, outboxRef, dispatch,
   );
   const { text, setText, handleSend } = useTextSender(
     conversationId, senderId, contactPrivateNumber, isSelfChat,
-    socketRef, peerPublicKeyRef, dispatch, replyTo, dismissReply, messages,
+    outboxRef, dispatch, replyTo, dismissReply, messages,
   );
   // Ref mirror so several quick picks in a row each build on the latest text
   // (the picker stays open between picks; a render may not have landed yet).
@@ -208,17 +257,23 @@ export const ChatScreen = () => {
   const recorder = useVoiceRecorder(sendMediaAsset, closeTray);
   const actions = useMessageActions(dispatch, senderId, socketRef);
   const safety = useChatSafety(
-    contactPrivateNumber, contactName, conversationId, isSelfChat, messages, senderId,
+    contactPrivateNumber, contactName, conversationId, isSelfChat || isGroup, messages, senderId,
   );
+  // Groups: report / block an individual member.
+  const memberSafety = useMemberSafety(conversationId, messages, senderId);
+  const targetOf = (m: Message) => ({ userId: m.senderId, name: m.senderName || 'this member' });
 
-  // Load message history when peer key is ready
+  // Load message history once we can decrypt it: the peer key (1:1) or the
+  // member list (groups). Member changes later don't reload history.
+  const cryptoReady = isSelfChat
+    ? true
+    : isGroup
+    ? (conv?.members?.length ?? 0) > 0
+    : peerPublicKey !== null;
   useEffect(() => {
-    if (isSelfChat) {
-      dispatch(loadMessagesThunk({ conversationId, peerPublicKey: null }));
-    } else if (peerPublicKey !== null) {
-      dispatch(loadMessagesThunk({ conversationId, peerPublicKey }));
-    }
-  }, [conversationId, peerPublicKey, isSelfChat, dispatch]);
+    if (!cryptoReady) return;
+    dispatch(loadMessagesThunk({ conversationId, crypto: cryptoRef.current }));
+  }, [conversationId, cryptoReady, dispatch]);
 
   // Older-history pagination: fired when the user scrolls to the top of the
   // thread. The thunk's own `condition` guards against double-fires and
@@ -228,7 +283,7 @@ export const ChatScreen = () => {
     dispatch(
       loadOlderMessagesThunk({
         conversationId,
-        peerPublicKey,
+        crypto: cryptoRef.current,
         before: messagesCursor,
       }),
     );
@@ -256,7 +311,7 @@ export const ChatScreen = () => {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.background }}>
         <ChatHeader
-          contactName={contactName}
+          contactName={chatTitle}
           contactPrivateNumber={contactPrivateNumber}
           contactProfilePictureKey={conv?.contactProfilePictureKey}
           isSelfChat={isSelfChat}
@@ -265,8 +320,12 @@ export const ChatScreen = () => {
           onBack={() => navigation.goBack()}
           onCall={handleCallPress}
           onCallLongPress={() => { /* reserved */ }}
-          onOverflow={() => safety.setMenuOpen(true)}
-          presence={peerPresence}
+          // Groups: ⋮ opens group info (members, report/block, leave).
+          onOverflow={isGroup ? openGroupInfo : () => safety.setMenuOpen(true)}
+          presence={isGroup ? null : peerPresence}
+          isGroup={isGroup}
+          memberCount={conv?.members?.length}
+          onOpenInfo={openGroupInfo}
         />
       </SafeAreaView>
 
@@ -294,6 +353,7 @@ export const ChatScreen = () => {
           messages={messages}
           senderId={senderId}
           contactName={contactName}
+          isGroup={isGroup}
           colors={colors}
           isSelfChat={isSelfChat}
           onReply={handleReply}
@@ -387,6 +447,20 @@ export const ChatScreen = () => {
         onStar={() => actions.actionSheet && actions.handleStar(actions.actionSheet.message)}
         onDelete={() => actions.actionSheet && actions.handleDelete(actions.actionSheet.message)}
         onReact={(e) => actions.actionSheet && actions.handleReact(actions.actionSheet.message, e)}
+        onReportSender={
+          isGroup
+            ? () => {
+                const m = actions.actionSheet?.message;
+                // After the sheet's Modal dismisses (iOS can't stack Modals).
+                if (m) setTimeout(() => memberSafety.openReport(targetOf(m)), 300);
+              }
+            : undefined
+        }
+        onBlockSender={
+          isGroup
+            ? () => actions.actionSheet && memberSafety.blockMember(targetOf(actions.actionSheet.message))
+            : undefined
+        }
         onMoreReactions={() => {
           const target = actions.actionSheet?.message;
           if (!target) return;
@@ -421,6 +495,16 @@ export const ChatScreen = () => {
         onClose={() => safety.setMenuOpen(false)}
         onToggleBlock={safety.toggleBlock}
         onReport={safety.openReport}
+      />
+
+      {/* Groups: report one member (from the long-press menu). */}
+      <ReportSheet
+        visible={memberSafety.target !== null}
+        contactName={memberSafety.target?.name ?? ''}
+        availableEvidence={memberSafety.availableEvidence}
+        submitting={memberSafety.submitting}
+        onClose={memberSafety.closeReport}
+        onSubmit={memberSafety.submitReport}
       />
 
       <ReportSheet

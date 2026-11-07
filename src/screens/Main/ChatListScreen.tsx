@@ -38,6 +38,7 @@ import {
   Conversation,
 } from '../../store/slices/chatSlice';
 import { ApiError, deleteConversationApi, updateConversationPrefsApi } from '../../services/api';
+import { serverHasFeature } from '../../services/serverFeatures';
 
 const ON_PRIMARY = '#ffffff';
 type FilterKey = 'all' | 'unread' | 'groups' | 'pinned';
@@ -156,7 +157,7 @@ export const ChatListScreen = () => {
       case 'unread':
         return sortedConvs.filter(isUnreadNow);
       case 'groups':
-        return [];
+        return sortedConvs.filter((c) => c.isGroup);
       case 'pinned':
         return sortedConvs.filter((c) => c.isPinned);
       default:
@@ -206,7 +207,9 @@ export const ChatListScreen = () => {
 
   const menuItems = [
     { label: t('chats.menuStartChat'), icon: 'chatbubble-outline', onPress: () => navigation.navigate('StartChat') },
-    { label: t('chats.menuCreateGroup'), icon: 'people-outline', onPress: () => navigation.navigate('CreateGroup') },
+    ...(serverHasFeature('groups')
+      ? [{ label: t('chats.menuCreateGroup'), icon: 'people-outline', onPress: () => navigation.navigate('CreateGroup') }]
+      : []),
     {
       label: t('chats.menuSelectAll'),
       icon: 'checkbox-outline',
@@ -339,6 +342,22 @@ export const ChatListScreen = () => {
   };
 
   const handleDelete = (conv: Conversation) => {
+    // Deleting a group = leaving it (others keep the group) — confirm first.
+    if (conv.isGroup) {
+      Alert.alert(
+        `Leave “${conv.contactName}”?`,
+        "You'll stop receiving messages from this group.",
+        [
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: 'Leave', style: 'destructive', onPress: () => softDelete(conv) },
+        ],
+      );
+      return;
+    }
+    softDelete(conv);
+  };
+
+  const softDelete = (conv: Conversation) => {
     // Hide the row immediately
     setSoftDeletedIds((prev) => {
       const next = new Set(prev);
@@ -391,7 +410,16 @@ export const ChatListScreen = () => {
       contactPrivateNumber: conv.contactPrivateNumber || '',
       contactPublicKey: conv.contactPublicKey,
       isSelfChat: conv.isSelfChat,
+      isGroup: conv.isGroup,
     });
+
+  /** Groups: "Alice: " / "You: " before the preview (not for system lines). */
+  const groupSenderPrefix = (c: Conversation) => {
+    if (!c.isGroup || !c.lastMessage || c.lastMessageType === 'system') return '';
+    if (c.lastMessageSenderId && c.lastMessageSenderId === userId) return 'You: ';
+    const name = c.lastMessageSenderName?.split(' ')[0];
+    return name ? `${name}: ` : '';
+  };
 
   /* ── Sub-renders ──────────────────────────────────────────── */
 
@@ -502,11 +530,17 @@ export const ChatListScreen = () => {
           />
         )}
 
-        <Avatar
-          profilePictureKey={item.contactProfilePictureKey}
-          name={item.contactName || '#'}
-          size={46}
-        />
+        {item.isGroup ? (
+          <View style={[styles.groupAvatar, { backgroundColor: colors.primary + '22' }]}>
+            <Ionicons name="people" size={24} color={colors.primary} />
+          </View>
+        ) : (
+          <Avatar
+            profilePictureKey={item.contactProfilePictureKey}
+            name={item.contactName || '#'}
+            size={46}
+          />
+        )}
 
         <View style={styles.rowMain}>
           <View style={styles.rowTitleLine}>
@@ -526,6 +560,7 @@ export const ChatListScreen = () => {
             )}
           </View>
           <Text style={[styles.rowPreview, { color: colors.textSecondary }]} numberOfLines={1}>
+            {groupSenderPrefix(item)}
             {item.lastMessageType === 'voice'
               ? (() => {
                   const d = item.lastMessage.match(/\d+:\d+/)?.[0];
@@ -802,6 +837,13 @@ export const ChatListScreen = () => {
 };
 
 const styles = StyleSheet.create({
+  groupAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: { flex: 1 },
 
   /* Header */

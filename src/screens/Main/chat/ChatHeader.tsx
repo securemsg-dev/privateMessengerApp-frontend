@@ -27,9 +27,21 @@ interface Props {
   onOverflow?: () => void;
   /** Peer online / last seen; null hides the status entirely. */
   presence?: PeerPresence | null;
+  /** Group mode: name is the group's, subtitle shows the member count. */
+  isGroup?: boolean;
+  memberCount?: number;
+  /** Groups: tapping the title opens group info. */
+  onOpenInfo?: () => void;
 }
 
 const ONLINE_GREEN = '#22a55b';
+const groupAvatarStyle = {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  alignItems: 'center' as const,
+  justifyContent: 'center' as const,
+};
 
 const formatPrivateNumber = (n: string) => {
   if (!n || n.length !== 10) return '';
@@ -48,6 +60,9 @@ export const ChatHeader = ({
   onCallLongPress,
   onOverflow,
   presence,
+  isGroup,
+  memberCount,
+  onOpenInfo,
 }: Props) => {
   const presenceText = formatPresence(presence);
   const online = !!presence?.online;
@@ -57,13 +72,24 @@ export const ChatHeader = ({
       <Ionicons name="chevron-back" size={26} color={colors.text} />
     </TouchableOpacity>
 
-    <Avatar
-      profilePictureKey={isSelfChat ? null : contactProfilePictureKey}
-      name={isSelfChat ? displayName || 'ME' : contactName}
-      size={36}
-    />
+    {isGroup ? (
+      <View style={[groupAvatarStyle, { backgroundColor: colors.primary + '22' }]}>
+        <Ionicons name="people" size={20} color={colors.primary} />
+      </View>
+    ) : (
+      <Avatar
+        profilePictureKey={isSelfChat ? null : contactProfilePictureKey}
+        name={isSelfChat ? displayName || 'ME' : contactName}
+        size={36}
+      />
+    )}
 
-    <View style={styles.headerInfo}>
+    <TouchableOpacity
+      style={styles.headerInfo}
+      onPress={isGroup ? onOpenInfo : undefined}
+      disabled={!isGroup}
+      activeOpacity={0.7}
+    >
       <Text style={[styles.headerName, { color: colors.text }]} numberOfLines={1}>
         {contactName}
       </Text>
@@ -93,8 +119,13 @@ export const ChatHeader = ({
             Personal space · synced locally
           </Text>
         )}
+        {isGroup && (
+          <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1}>
+            {memberCount ? `${memberCount} members · tap for group info` : 'Group'}
+          </Text>
+        )}
       </View>
-    </View>
+    </TouchableOpacity>
 
     {!isSelfChat && (
       <TouchableOpacity

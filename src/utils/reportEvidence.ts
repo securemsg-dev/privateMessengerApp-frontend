@@ -18,6 +18,7 @@ interface EvidenceCandidate {
   content: string;
   timestamp: string;
   deletedAt: string | null;
+  type?: string;
 }
 
 /**
@@ -30,11 +31,19 @@ interface EvidenceCandidate {
 export function buildEvidence(
   messages: EvidenceCandidate[],
   senderId: string,
+  /**
+   * Groups: only messages from the person being reported. Without this a
+   * group report would attach OTHER members' plaintext and pin their words
+   * on the reported user.
+   */
+  reportedUserId?: string,
 ): ReportEvidenceMessage[] {
   return messages
     .filter(
       (m) =>
         m.senderId !== senderId &&
+        (!reportedUserId || m.senderId === reportedUserId) &&
+        m.type !== 'system' &&
         !m.deletedAt &&
         typeof m.content === 'string' &&
         m.content.length > 0,
