@@ -619,63 +619,73 @@ export function mediaPlaceholder(mime: string): string {
  * Caller may supply `id` to keep the same identifier across the optimistic
  * insert and the WS `client_temp_id` echo (lets the server confirmation
  * flow back to the right row without changing React keys).
+ *
+ * With an `id`, the row is inserted SYNCHRONOUSLY by the `pending` reducer,
+ * i.e. before `dispatch` returns. The local SQLite save is async, and the
+ * send path runs in parallel with it: a "failed" status or a fast server
+ * echo must always find the row, or they're lost and the bubble sits on
+ * "Sending…" forever (or the echo lands as a duplicate bubble).
  */
+export type SendMessagePayload = {
+  conversationId: string;
+  senderId: string;
+  receiverId: string;
+  content: string;
+  type?: MessageType;
+  mediaUri?: string;
+  id?: string;
+  /** True when the message still has to reach the server (shows the
+   *  "Sending" clock until the echo). Self-chat is local-only → false. */
+  pending?: boolean;
+  /** View-once photo/video (no local preview is kept). */
+  viewOnce?: boolean;
+  /** If set, this message is a reply to another message (Phase C.2). */
+  replyTo?: ReplyPreview | null;
+  /** Phase D — encrypted-media envelope for non-text messages. */
+  mediaEnvelope?: MediaEnvelope | null;
+  /** Locally-known display metadata (voice duration/waveform, dimensions). */
+  mediaMeta?: MediaMeta;
+};
+
+function buildOutgoingMessage(payload: SendMessagePayload, id: string): Message {
+  return {
+    id,
+    conversationId: payload.conversationId,
+    senderId: payload.senderId,
+    receiverId: payload.receiverId,
+    content: payload.content,
+    type: payload.type || 'text',
+    mediaUri: payload.mediaUri,
+    timestamp: new Date().toISOString(),
+    status: payload.pending ? 'sending' : 'sent',
+    reactions: [],
+    isStarred: false,
+    replyToId: payload.replyTo?.id ?? null,
+    replyPreview: payload.replyTo ?? null,
+    deletedAt: null,
+    deletedBy: null,
+    mediaEnvelope: payload.mediaEnvelope ?? null,
+    ...(payload.mediaMeta ? { mediaMeta: payload.mediaMeta } : {}),
+    ...(payload.viewOnce ? { viewOnce: true, openedAt: null } : {}),
+  };
+}
+
 export const sendMessageThunk = createAsyncThunk(
   'chat/sendMessage',
-  async (payload: {
-    conversationId: string;
-    senderId: string;
-    receiverId: string;
-    content: string;
-    type?: MessageType;
-    mediaUri?: string;
-    id?: string;
-    /** True when the message still has to reach the server (shows the
-     *  "Sending" clock until the echo). Self-chat is local-only → false. */
-    pending?: boolean;
-    /** View-once photo/video (no local preview is kept). */
-    viewOnce?: boolean;
-    /** If set, this message is a reply to another message (Phase C.2). */
-    replyTo?: ReplyPreview | null;
-    /** Phase D — encrypted-media envelope for non-text messages. */
-    mediaEnvelope?: MediaEnvelope | null;
-    /** Locally-known display metadata (voice duration/waveform, dimensions). */
-    mediaMeta?: MediaMeta;
-  }) => {
+  async (payload: SendMessagePayload) => {
     const id =
       payload.id ??
       Date.now().toString(36) + Math.random().toString(36).slice(2);
-    const type = payload.type || 'text';
     await saveMessage(
       id,
       payload.conversationId,
       payload.senderId,
       payload.receiverId,
       payload.content,
-      type,
+      payload.type || 'text',
       payload.mediaUri,
     );
-    const message: Message = {
-      id,
-      conversationId: payload.conversationId,
-      senderId: payload.senderId,
-      receiverId: payload.receiverId,
-      content: payload.content,
-      type,
-      mediaUri: payload.mediaUri,
-      timestamp: new Date().toISOString(),
-      status: payload.pending ? 'sending' : 'sent',
-      reactions: [],
-      isStarred: false,
-      replyToId: payload.replyTo?.id ?? null,
-      replyPreview: payload.replyTo ?? null,
-      deletedAt: null,
-      deletedBy: null,
-      mediaEnvelope: payload.mediaEnvelope ?? null,
-      ...(payload.mediaMeta ? { mediaMeta: payload.mediaMeta } : {}),
-      ...(payload.viewOnce ? { viewOnce: true, openedAt: null } : {}),
-    };
-    return message;
+    return buildOutgoingMessage(payload, id);
   },
 );
 
@@ -1110,19 +1120,24 @@ const chatSlice = createSlice({
           state.activeMessages = action.payload.messages;
         }
       })
-      // sendMessage — upsert so a fast WS echo that already inserted the
-      // message by client_temp_id doesn't produce a duplicate key.
+      // sendMessage — insert the optimistic row the moment it's dispatched
+      // (see sendMessageThunk). My own message is the conversation's latest,
+      // so the chat list is updated straight away too.
+      .addCase(sendMessageThunk.pending, (state, action) => {
+        const arg = action.meta.arg;
+        if (!arg.id || state.activeMessages.some((m) => m.id === arg.id)) return;
+        const msg = buildOutgoingMessage(arg, arg.id);
+        state.activeMessages.push(msg);
+        touchConversation(state, msg);
+      })
       .addCase(sendMessageThunk.fulfilled, (state, action) => {
         const msg = action.payload;
-        // My own message is the conversation's latest: show it in the chat
-        // list straight away (nothing else updates the list for my sends).
+        // Already inserted by `pending`: leave it alone. Its status may have
+        // moved on meanwhile (failed, or confirmed by the echo) and must not
+        // be reset to "sending".
+        if (state.activeMessages.some((m) => m.id === msg.id)) return;
+        state.activeMessages.push(msg);
         touchConversation(state, msg);
-        const idx = state.activeMessages.findIndex((m) => m.id === msg.id);
-        if (idx >= 0) {
-          state.activeMessages[idx] = { ...state.activeMessages[idx], ...msg };
-        } else {
-          state.activeMessages.push(msg);
-        }
       })
       // deleteAllConversations
       .addCase(deleteAllConversationsThunk.fulfilled, (state) => {

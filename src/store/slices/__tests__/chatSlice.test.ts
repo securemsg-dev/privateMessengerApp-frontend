@@ -296,6 +296,53 @@ describe('chat list stays in step with the open chat', () => {
   });
 });
 
+describe('sendMessage optimistic row', () => {
+  const arg = {
+    id: 'local1',
+    conversationId: 'c1',
+    senderId: 'me',
+    receiverId: 'them',
+    content: 'hi',
+    type: 'text' as const,
+    pending: true,
+  };
+  const pending = () => sendMessageThunk.pending('req1', arg);
+  const fulfilled = () =>
+    sendMessageThunk.fulfilled(
+      makeMessage({ id: 'local1', content: 'hi', status: 'sending' }),
+      'req1',
+      arg,
+    );
+
+  it('is in the thread the moment it is dispatched', () => {
+    const next = reducer(stateWith(), pending());
+    expect(next.activeMessages).toHaveLength(1);
+    expect(next.activeMessages[0]).toMatchObject({ id: 'local1', status: 'sending' });
+  });
+
+  it('a failure reported before the local save finishes stays failed', () => {
+    let s = reducer(stateWith(), pending());
+    s = reducer(s, updateMessageStatus({ id: 'local1', status: 'failed' }));
+    s = reducer(s, fulfilled());
+    expect(s.activeMessages).toHaveLength(1);
+    expect(s.activeMessages[0].status).toBe('failed');
+  });
+
+  it('an echo that beats the local save confirms the row instead of duplicating it', () => {
+    let s = reducer(stateWith(), pending());
+    s = reducer(
+      s,
+      upsertMessage({
+        message: makeMessage({ id: 'server-1', content: 'hi', status: 'sent' }),
+        matchClientTempId: 'local1',
+      }),
+    );
+    s = reducer(s, fulfilled());
+    expect(s.activeMessages).toHaveLength(1);
+    expect(s.activeMessages[0]).toMatchObject({ id: 'local1', status: 'sent' });
+  });
+});
+
 describe('loadMessages keeps media already on screen', () => {
   it('carries downloaded files over to the fresh server page', () => {
     const cached = makeMessage({ id: 'p1', type: 'image', mediaUri: 'file:///cache/p1.jpg' });
