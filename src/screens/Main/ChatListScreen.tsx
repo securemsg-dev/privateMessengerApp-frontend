@@ -12,8 +12,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { useSelector, useDispatch } from 'react-redux';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
+import { useSelector, useDispatch, useStore } from 'react-redux';
 
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../theme/ThemeContext';
@@ -36,6 +36,7 @@ import {
   deleteSelectedConversationsThunk,
   mergeConversation,
   removeConversation,
+  needsConversationRefresh,
   Conversation,
 } from '../../store/slices/chatSlice';
 import { ApiError, deleteConversationApi, updateConversationPrefsApi } from '../../services/api';
@@ -118,14 +119,39 @@ export const ChatListScreen = () => {
     dispatch(loadContactNamesThunk());
   }, []);
 
-  // Refresh from the server every time this screen comes back into view
-  // (app start, and returning from a chat) so previews, order and unread
-  // counts are never left stale.
+  // Refresh from the server only when the list may really be out of date.
+  // While the app runs, the user socket keeps previews, order and unread
+  // current, and opening a chat clears its unread locally — so coming back
+  // from a chat normally costs no request (it used to re-download and
+  // re-decrypt the whole list every time). See needsConversationRefresh.
+  const store = useStore<RootState>();
+  const isFocused = useIsFocused();
+  const fetchedSinceMount = useRef(false);
+  const listStaleAt = useSelector((s: RootState) => s.chat.conversationsStaleAt);
+  const listStatus = useSelector((s: RootState) => s.chat.status);
+
   useFocusEffect(
     useCallback(() => {
-      dispatch(loadConversationsThunk());
-    }, [dispatch]),
+      const chat = store.getState().chat;
+      if (chat.status === 'loading') return;
+      // The first view after mounting (app start, just signed in) always loads.
+      if (!fetchedSinceMount.current || needsConversationRefresh(chat, Date.now())) {
+        fetchedSinceMount.current = true;
+        dispatch(loadConversationsThunk());
+      }
+    }, [dispatch, store]),
   );
+
+  // Marked stale while the list is on screen (socket reconnected, app back
+  // from the background) → refresh now, or as soon as an in-flight load ends.
+  // Reads the store, not render values, so it can't double up with the
+  // focus effect above.
+  useEffect(() => {
+    const chat = store.getState().chat;
+    if (isFocused && chat.conversationsStaleAt !== null && chat.status !== 'loading') {
+      dispatch(loadConversationsThunk());
+    }
+  }, [isFocused, listStaleAt, listStatus, dispatch, store]);
 
   useEffect(() => {
     // Show the background-activity reminder only when it's actually useful:

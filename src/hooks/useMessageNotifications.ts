@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { useDispatch, useStore } from 'react-redux';
 
 import { AppDispatch, RootState } from '../store';
@@ -6,6 +7,7 @@ import {
   applyMessageNotification,
   cryptoConvOf,
   loadConversationsThunk,
+  markConversationsStale,
   MessageType,
   refreshConversationThunk,
 } from '../store/slices/chatSlice';
@@ -45,6 +47,12 @@ export function useMessageNotifications() {
 
   useEffect(() => {
     const unsubscribe = userSocketBus.subscribe((event) => {
+      // The socket dropped and came back: anything sent in the gap was
+      // missed, so the chat list re-fetches (now if on screen, else when shown).
+      if (event.type === 'user_socket_reconnected') {
+        dispatch(markConversationsStale());
+        return;
+      }
       // Group membership/name changed, or we were added/removed: refetch
       // that one conversation (it drops out of the list if we lost access).
       if (event.type === 'conversation_update') {
@@ -115,4 +123,24 @@ export function useMessageNotifications() {
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
     };
   }, [dispatch, store]);
+
+  // Back from a real stay in the background: the OS may have paused the app
+  // while the socket still looked open, so frames could have been lost
+  // without a reconnect. Short trips (photo picker, permission prompt)
+  // don't count.
+  useEffect(() => {
+    let backgroundedAt: number | null = null;
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'background') {
+        backgroundedAt = Date.now();
+      } else if (next === 'active' && backgroundedAt !== null) {
+        if (Date.now() - backgroundedAt >= BACKGROUND_RESYNC_MS) dispatch(markConversationsStale());
+        backgroundedAt = null;
+      }
+    });
+    return () => sub.remove();
+  }, [dispatch]);
 }
+
+/** Time in the background after which the chat list re-syncs on return. */
+export const BACKGROUND_RESYNC_MS = 15 * 1000;

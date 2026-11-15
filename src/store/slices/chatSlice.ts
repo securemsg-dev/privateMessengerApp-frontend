@@ -192,6 +192,15 @@ interface ChatState {
    * own display name.
    */
   contactNames: Record<string, string>;
+  /** When the last COMPLETE server load of the list started (epoch ms). */
+  conversationsFetchedAt: number | null;
+  /**
+   * Set (epoch ms) when the list may have missed changes the live socket
+   * can't patch in: the user socket reconnected, the app came back from the
+   * background, a message was deleted for everyone. Cleared by a load that
+   * started after it.
+   */
+  conversationsStaleAt: number | null;
 }
 
 const initialState: ChatState = {
@@ -203,7 +212,28 @@ const initialState: ChatState = {
   messagesCursor: null,
   loadingOlder: false,
   contactNames: {},
+  conversationsFetchedAt: null,
+  conversationsStaleAt: null,
 };
+
+/**
+ * Safety net for list changes nothing tells us about (a contact's new name or
+ * avatar, pin/mute set on another device). Everything else reaches the list
+ * live or marks it stale, so returning from a chat doesn't refetch.
+ */
+export const CONVERSATIONS_MAX_AGE_MS = 2 * 60 * 1000;
+
+/** Should the chat list re-fetch from the server now? */
+export function needsConversationRefresh(
+  chat: Pick<ChatState, 'conversationsFetchedAt' | 'conversationsStaleAt'>,
+  now: number,
+): boolean {
+  return (
+    chat.conversationsStaleAt !== null ||
+    chat.conversationsFetchedAt === null ||
+    now - chat.conversationsFetchedAt >= CONVERSATIONS_MAX_AGE_MS
+  );
+}
 
 const isSelfChatId = (conversationId: string) =>
   conversationId.startsWith('self_');
@@ -314,9 +344,17 @@ export async function conversationFromDTO(
   return conv;
 }
 
-export const loadConversationsThunk = createAsyncThunk<Conversation[]>(
+export interface LoadedConversations {
+  conversations: Conversation[];
+  /** False when the server part failed: `conversations` holds self-chats only. */
+  complete: boolean;
+  startedAt: number;
+}
+
+export const loadConversationsThunk = createAsyncThunk<LoadedConversations>(
   'chat/loadConversations',
   async (_arg, { getState }) => {
+    const startedAt = Date.now();
 
     // 1. Self-chat from local SQLite
     const localRows = (await getConversations()) as Array<{
@@ -348,20 +386,18 @@ export const loadConversationsThunk = createAsyncThunk<Conversation[]>(
     // 2. Real conversations from the server (best-effort — keep self-chat
     //    available even if the network is down). Last-message previews are
     //    decrypted using the per-conversation peer public key.
-    let serverConvs: Conversation[] = [];
     try {
       const list = await listConversationsApi();
       const myUserId = (getState() as { auth: { userId: string | null } }).auth.userId;
-      serverConvs = await Promise.all(list.map((c) => conversationFromDTO(c, myUserId)));
+      const serverConvs = await Promise.all(list.map((c) => conversationFromDTO(c, myUserId)));
       // Cache the freshly-loaded list for instant render next launch. Only on
-      // success — a network failure leaves serverConvs empty and must not
-      // clobber a good cache.
+      // success — a network failure must not clobber a good cache.
       void cacheSet(CACHE_KEYS.conversations, [...selfConvs, ...serverConvs]);
+      return { conversations: [...selfConvs, ...serverConvs], complete: true, startedAt };
     } catch (err) {
       console.warn('[chat] Failed to load server conversations:', err);
+      return { conversations: selfConvs, complete: false, startedAt };
     }
-
-    return [...selfConvs, ...serverConvs];
   },
 );
 
@@ -881,6 +917,11 @@ const chatSlice = createSlice({
       }
     },
 
+    /** The list may have missed changes; the chat list re-fetches when shown. */
+    markConversationsStale(state) {
+      state.conversationsStaleAt = Date.now();
+    },
+
     /** Track which conversation is on-screen (set by ChatScreen on focus). */
     setActiveConversation(state, action: PayloadAction<string | null>) {
       if (state.activeConversationId !== action.payload) state.peerPresence = null;
@@ -996,6 +1037,9 @@ const chatSlice = createSlice({
         timestamp: string;
       }>,
     ) {
+      // If it was the chat's newest message, the list row's preview is now
+      // wrong and can't be rebuilt here — let the list re-fetch when shown.
+      state.conversationsStaleAt = Date.now();
       const msg = state.activeMessages.find(
         (m) => m.id === action.payload.messageId,
       );
@@ -1064,8 +1108,19 @@ const chatSlice = createSlice({
         state.status = 'loading';
       })
       .addCase(loadConversationsThunk.fulfilled, (state, action) => {
+        const { conversations, complete, startedAt } = action.payload;
         state.status = 'idle';
-        state.conversations = action.payload;
+        state.conversations = conversations;
+        if (complete) state.conversationsFetchedAt = startedAt;
+        // Covered by this attempt (a failed one too — reconnecting marks the
+        // list stale again, and retrying here would loop while offline).
+        if (state.conversationsStaleAt !== null && state.conversationsStaleAt <= startedAt) {
+          state.conversationsStaleAt = null;
+        }
+      })
+      .addCase(loadConversationsThunk.rejected, (state) => {
+        state.status = 'idle';
+        state.conversationsStaleAt = null;
       })
       // Cached conversations — apply only while nothing is loaded yet, so a
       // late-resolving cache read never clobbers a fresh network result.
@@ -1167,6 +1222,7 @@ export const {
   markMessageDeletedForEveryone,
   hydrateMessageMedia,
   markViewOnceOpened,
+  markConversationsStale,
 } = chatSlice.actions;
 
 /**

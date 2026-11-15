@@ -3,7 +3,11 @@
  * (thunks talk to the network/SQLite and are covered by manual testing).
  */
 import reducer, {
+  CONVERSATIONS_MAX_AGE_MS,
+  loadConversationsThunk,
   loadMessagesThunk,
+  markConversationsStale,
+  needsConversationRefresh,
   sendMessageThunk,
   markViewOnceOpened,
   applyReactionEvent,
@@ -355,5 +359,50 @@ describe('loadMessages keeps media already on screen', () => {
     expect(next.activeMessages[0].mediaUri).toBe('file:///cache/p1.jpg');
     expect(next.activeMessages[0].status).toBe('read');
     expect(next.activeMessages[1].mediaUri).toBeUndefined();
+  });
+});
+
+describe('chat list refresh policy', () => {
+  const NOW = 1_800_000_000_000;
+  const serverConv = { id: 'c1', isSelfChat: false, lastMessage: 'from server' } as any;
+  const selfConv = { id: 'self_me', isSelfChat: true, lastMessage: 'note' } as any;
+  const loaded = (payload: object) => ({ type: loadConversationsThunk.fulfilled.type, payload });
+  const base = () => reducer(undefined, { type: '@@init' });
+
+  it('refreshes only when never loaded, too old, or marked stale', () => {
+    const fresh = { conversationsFetchedAt: NOW - 10_000, conversationsStaleAt: null };
+    expect(needsConversationRefresh(fresh, NOW)).toBe(false); // back from a chat
+    expect(needsConversationRefresh({ ...fresh, conversationsFetchedAt: null }, NOW)).toBe(true);
+    expect(
+      needsConversationRefresh({ ...fresh, conversationsFetchedAt: NOW - CONVERSATIONS_MAX_AGE_MS }, NOW),
+    ).toBe(true);
+    expect(needsConversationRefresh({ ...fresh, conversationsStaleAt: NOW - 1 }, NOW)).toBe(true);
+  });
+
+  it('a complete load records its start time and clears staleness from before it', () => {
+    const s = reducer(
+      { ...base(), conversationsStaleAt: NOW - 5 },
+      loaded({ conversations: [selfConv, serverConv], complete: true, startedAt: NOW }),
+    );
+    expect(s.conversations).toHaveLength(2);
+    expect(s.conversationsFetchedAt).toBe(NOW);
+    expect(s.conversationsStaleAt).toBeNull();
+  });
+
+  it('staleness marked while a load was in flight survives it', () => {
+    const s = reducer(
+      { ...base(), conversationsStaleAt: NOW + 5 },
+      loaded({ conversations: [serverConv], complete: true, startedAt: NOW }),
+    );
+    expect(s.conversationsStaleAt).toBe(NOW + 5);
+  });
+
+  it('marking stale, and delete-for-everyone, make the list re-fetch', () => {
+    expect(reducer(base(), markConversationsStale()).conversationsStaleAt).not.toBeNull();
+    const s = reducer(
+      base(),
+      markMessageDeletedForEveryone({ messageId: 'm1', byUserId: 'u', timestamp: 't' }),
+    );
+    expect(s.conversationsStaleAt).not.toBeNull();
   });
 });

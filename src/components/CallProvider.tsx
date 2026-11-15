@@ -235,6 +235,8 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   // tear a call down on terminal ICE failure without a dependency cycle.
   const endCallRef = useRef<(reason?: string) => Promise<void>>(async () => {});
   const userWsRef = useRef<WebSocket | null>(null);
+  /** Set after the first user-socket open, so later opens count as reconnects. */
+  const userWsOpenedRef = useRef(false);
   const pendingIceRef = useRef<RTCIceCandidate[]>([]);
   // Store incoming offer before user accepts
   const pendingOfferRef = useRef<{ sdp: string; callId: string; fromUserId: string; conversationId: string; contactName: string; contactPrivateNumber: string } | null>(null);
@@ -466,6 +468,10 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       // fresh socket counts as active server-side; this corrects it when
       // the socket reconnects while backgrounded).
       sendPresence(ws, AppState.currentState);
+      // Chat-list events sent while we were disconnected are gone; tell the
+      // list to re-sync (the first open needs nothing — the list loads anyway).
+      if (userWsOpenedRef.current) userSocketBus.emit({ type: 'user_socket_reconnected' });
+      userWsOpenedRef.current = true;
       // Pre-warm the ICE/TURN config so the first call doesn't pay for the
       // fetch on the critical path. Failure is non-fatal (call setup refetches).
       void fetchIceServers().catch(() => {});
@@ -606,6 +612,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     } else {
       userWsRef.current?.close();
       userWsRef.current = null;
+      userWsOpenedRef.current = false; // the next sign-in's first open isn't a reconnect
     }
     return () => {
       userWsRef.current?.close();
