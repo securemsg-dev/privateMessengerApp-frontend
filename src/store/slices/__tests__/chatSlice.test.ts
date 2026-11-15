@@ -2,6 +2,7 @@
  * Reducer unit tests for the chat slice — pure state transitions only
  * (thunks talk to the network/SQLite and are covered by manual testing).
  */
+import { forceLogout, logoutThunk } from '../authSlice';
 import reducer, {
   CONVERSATIONS_MAX_AGE_MS,
   loadConversationsThunk,
@@ -411,5 +412,20 @@ describe('chat list refresh policy', () => {
       markMessageDeletedForEveryone({ messageId: 'm1', byUserId: 'u', timestamp: 't' }),
     );
     expect(s.conversationsStaleAt).not.toBeNull();
+  });
+
+  it('signing out drops every chat from memory', () => {
+    const signedIn = {
+      ...base(),
+      conversations: [serverConv],
+      activeMessages: [makeMessage()],
+      conversationsFetchedAt: NOW,
+    };
+    for (const action of [{ type: logoutThunk.fulfilled.type }, forceLogout()]) {
+      const s = reducer(signedIn, action);
+      expect(s.conversations).toEqual([]);
+      expect(s.activeMessages).toEqual([]);
+      expect(s.conversationsFetchedAt).toBeNull();
+    }
   });
 });

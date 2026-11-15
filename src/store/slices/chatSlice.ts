@@ -1,4 +1,10 @@
-import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createAsyncThunk, createSlice, isAnyOf, PayloadAction } from '@reduxjs/toolkit';
+import {
+  confirmDeleteFromLoginThunk,
+  deleteAccountThunk,
+  forceLogout,
+  logoutThunk,
+} from './authSlice';
 import {
   saveMessage,
   getMessagesByConversation,
@@ -1212,7 +1218,20 @@ const chatSlice = createSlice({
       .addCase(deleteSelectedConversationsThunk.fulfilled, (state, action) => {
         const removed = new Set(action.payload);
         state.conversations = state.conversations.filter((c) => !removed.has(c.id));
-      });
+      })
+      // Session ended: drop everything in memory, so the next account to sign
+      // in on this phone never sees this one's chats (decrypted previews,
+      // unread badge) while its own list loads — and starts with no
+      // freshness state carried over.
+      .addMatcher(
+        isAnyOf(
+          logoutThunk.fulfilled,
+          forceLogout,
+          deleteAccountThunk.fulfilled,
+          confirmDeleteFromLoginThunk.fulfilled,
+        ),
+        () => initialState,
+      );
   },
 });
 
