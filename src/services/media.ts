@@ -51,23 +51,51 @@ import {
 } from './crypto';
 
 const CACHE_SUBDIR = 'decrypted-media';
+/**
+ * View-once plaintext lives in its own folder, never in the shared cache
+ * above, so it can be wiped wholesale: on close, when the chat unmounts, and
+ * at every app start (covers the app being killed while the viewer is open).
+ */
+const VIEW_ONCE_SUBDIR = 'view-once';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-let cacheDirReady: Promise<string> | null = null;
+const dirReady = new Map<string, Promise<string>>();
 
-async function ensureCacheDir(): Promise<string> {
-  if (!cacheDirReady) {
-    cacheDirReady = (async () => {
-      const dir = `${FileSystem.cacheDirectory}${CACHE_SUBDIR}/`;
+function ensureDir(subdir: string): Promise<string> {
+  let ready = dirReady.get(subdir);
+  if (!ready) {
+    ready = (async () => {
+      const dir = `${FileSystem.cacheDirectory}${subdir}/`;
       const info = await FileSystem.getInfoAsync(dir);
       if (!info.exists) {
         await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
       }
       return dir;
     })();
+    // Don't cache a failure: the next call should retry.
+    ready.catch(() => dirReady.delete(subdir));
+    dirReady.set(subdir, ready);
   }
-  return cacheDirReady;
+  return ready;
+}
+
+const ensureCacheDir = () => ensureDir(CACHE_SUBDIR);
+
+/**
+ * Delete every decrypted view-once file. Called once at app start, before
+ * any viewer can be open, so nothing a crash or force-quit left behind
+ * survives into the next session.
+ */
+export async function purgeViewOnceMedia(): Promise<void> {
+  dirReady.delete(VIEW_ONCE_SUBDIR);
+  try {
+    await FileSystem.deleteAsync(`${FileSystem.cacheDirectory}${VIEW_ONCE_SUBDIR}/`, {
+      idempotent: true,
+    });
+  } catch {
+    /* best-effort */
+  }
 }
 
 async function readFileBytes(uri: string): Promise<Uint8Array> {
@@ -291,12 +319,14 @@ export async function discardLocalMedia(uri: string | undefined): Promise<void> 
 
 export async function downloadAndDecryptMedia(
   envelope: MediaEnvelope,
+  opts: { viewOnce?: boolean } = {},
 ): Promise<string> {
-  const cached = downloadInFlight.get(envelope.blobId);
+  const flightKey = opts.viewOnce ? `vo:${envelope.blobId}` : envelope.blobId;
+  const cached = downloadInFlight.get(flightKey);
   if (cached) return cached;
 
   const promise = (async () => {
-    const dir = await ensureCacheDir();
+    const dir = await (opts.viewOnce ? ensureDir(VIEW_ONCE_SUBDIR) : ensureCacheDir());
     const ext = extensionFor(envelope.mime);
     const targetUri = `${dir}${envelope.blobId}.${ext}`;
 
@@ -340,8 +370,8 @@ export async function downloadAndDecryptMedia(
     return targetUri;
   })();
 
-  downloadInFlight.set(envelope.blobId, promise);
+  downloadInFlight.set(flightKey, promise);
   // Always release the slot — successful or not — so retries are possible.
-  promise.finally(() => downloadInFlight.delete(envelope.blobId));
+  promise.finally(() => downloadInFlight.delete(flightKey)).catch(() => {});
   return promise;
 }

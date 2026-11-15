@@ -11,10 +11,14 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { StatusBar } from 'expo-status-bar';
 import { initDB } from './src/services/database';
 import { CallProvider } from './src/components/CallProvider';
+import { purgeViewOnceMedia } from './src/services/media';
 
 export default function App() {
   useEffect(() => {
     initDB();
+    // Nothing can be on screen yet: remove any view-once photo/video left
+    // decrypted on disk by a crash or force-quit while it was being viewed.
+    void purgeViewOnceMedia();
   }, []);
 
   return (

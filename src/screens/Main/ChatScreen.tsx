@@ -192,16 +192,21 @@ export const ChatScreen = () => {
   };
   // View-once: download → tell the server it was opened (which wipes it for
   // everyone) → show it. Marking BEFORE showing means it can never be seen
-  // twice, even if the app is killed mid-view; the local file is removed on
-  // close.
+  // twice, even if the app is killed mid-view. The decrypted file lives in
+  // the separate view-once folder and is removed on close, when this screen
+  // unmounts, and (for a crash / force-quit) by purgeViewOnceMedia at startup.
   const viewOnceUriRef = useRef<string | undefined>(undefined);
+  useEffect(() => () => {
+    void discardLocalMedia(viewOnceUriRef.current);
+    viewOnceUriRef.current = undefined;
+  }, []);
   const [openingViewOnce, setOpeningViewOnce] = useState(false);
   const handleOpenViewOnce = async (m: Message) => {
     if (openingViewOnce || !m.mediaEnvelope || m.openedAt) return;
     setOpeningViewOnce(true);
     let localUri: string | undefined;
     try {
-      localUri = await downloadAndDecryptMedia(m.mediaEnvelope);
+      localUri = await downloadAndDecryptMedia(m.mediaEnvelope, { viewOnce: true });
       await markViewOnceOpenedApi(m.id);
     } catch {
       await discardLocalMedia(localUri);
