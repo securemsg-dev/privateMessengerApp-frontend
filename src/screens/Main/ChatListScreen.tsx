@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSelector, useDispatch } from 'react-redux';
 
 import { useTranslation } from 'react-i18next';
@@ -114,10 +114,18 @@ export const ChatListScreen = () => {
   useEffect(() => {
     // Paint the cached list instantly, then refresh from the network.
     dispatch(hydrateConversationsThunk());
-    dispatch(loadConversationsThunk());
     // The user's own names for contacts (device-only).
     dispatch(loadContactNamesThunk());
   }, []);
+
+  // Refresh from the server every time this screen comes back into view
+  // (app start, and returning from a chat) so previews, order and unread
+  // counts are never left stale.
+  useFocusEffect(
+    useCallback(() => {
+      dispatch(loadConversationsThunk());
+    }, [dispatch]),
+  );
 
   useEffect(() => {
     // Show the background-activity reminder only when it's actually useful:

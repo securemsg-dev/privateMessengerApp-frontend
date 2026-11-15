@@ -697,6 +697,42 @@ export const deleteSelectedConversationsThunk = createAsyncThunk<
   return ids;
 });
 
+/* ── Chat-list preview kept in step with the open chat ─── */
+
+/** Chat-list preview text for a message already decrypted in the thread. */
+export function listPreviewOf(m: Message): string {
+  if (m.viewOnce) return m.type === 'video' ? '🎥 Video' : '📷 Photo';
+  switch (m.type) {
+    case 'image':
+      return '📷 Photo';
+    case 'video':
+      return '🎥 Video';
+    case 'document':
+      return '📎 Document';
+    case 'voice':
+      return voicePreviewText(mediaMetaOf(m).durationMs);
+    default:
+      return m.content;
+  }
+}
+
+/**
+ * Make `m` the conversation's last message in the chat list (preview, time,
+ * sender) — unless the list already shows something newer.
+ */
+function touchConversation(state: ChatState, m: Message): void {
+  const conv = state.conversations.find((c) => c.id === m.conversationId);
+  if (!conv) return;
+  const shown = conv.lastMessageTime ? new Date(conv.lastMessageTime).getTime() : 0;
+  const mine = new Date(m.timestamp).getTime();
+  if (Number.isFinite(shown) && Number.isFinite(mine) && mine < shown) return;
+  conv.lastMessage = listPreviewOf(m);
+  conv.lastMessageType = m.type;
+  conv.lastMessageTime = m.timestamp;
+  conv.lastMessageSenderId = m.senderId;
+  conv.lastMessageSenderName = m.senderName ?? null;
+}
+
 /* ── Custom contact names (device-only) ────────────────── */
 
 export const CONTACT_NAME_MAX = 40;
@@ -801,6 +837,9 @@ const chatSlice = createSlice({
         state.activeMessages[idx] = { ...state.activeMessages[idx], ...message };
       } else {
         state.activeMessages.push(message);
+        // A message that arrived while this chat is open: the user channel
+        // doesn't always notify for it, so update the list row here.
+        touchConversation(state, message);
       }
     },
 
@@ -1027,7 +1066,21 @@ const chatSlice = createSlice({
       })
       // loadMessages
       .addCase(loadMessagesThunk.fulfilled, (state, action) => {
-        state.activeMessages = action.payload.messages;
+        // The cached thread may already be on screen with its media
+        // downloaded. Replacing it wholesale would throw those local files
+        // away and leave every photo / voice note stuck on a spinner, so
+        // carry them over to the fresh rows.
+        const local = new Map(
+          state.activeMessages
+            .filter((m) => m.mediaUri && !m.viewOnce)
+            .map((m) => [m.id, m] as const),
+        );
+        state.activeMessages = action.payload.messages.map((m) => {
+          const prev = local.get(m.id);
+          return prev && !m.mediaUri && !m.viewOnce && !m.deletedAt
+            ? { ...m, mediaUri: prev.mediaUri }
+            : m;
+        });
         state.messagesCursor = action.payload.nextCursor;
       })
       // loadOlderMessages — prepend, dedupe against anything already loaded,
@@ -1061,6 +1114,9 @@ const chatSlice = createSlice({
       // message by client_temp_id doesn't produce a duplicate key.
       .addCase(sendMessageThunk.fulfilled, (state, action) => {
         const msg = action.payload;
+        // My own message is the conversation's latest: show it in the chat
+        // list straight away (nothing else updates the list for my sends).
+        touchConversation(state, msg);
         const idx = state.activeMessages.findIndex((m) => m.id === msg.id);
         if (idx >= 0) {
           state.activeMessages[idx] = { ...state.activeMessages[idx], ...msg };

@@ -202,10 +202,10 @@ export const MessageBubble = React.memo(
             style={[
               styles.mediaPlaceholder,
               size,
-              { backgroundColor: isMine ? 'rgba(255,255,255,0.15)' : colors.border },
+              { backgroundColor: colors.border },
             ]}
           >
-            <ActivityIndicator color={isMine ? ON_PRIMARY : colors.primary} />
+            <ActivityIndicator color={colors.primary} />
           </View>
         );
       }
@@ -322,6 +322,12 @@ export const MessageBubble = React.memo(
       );
     }
 
+    const bareMedia =
+      (item.type === 'image' || item.type === 'video') &&
+      !item.deletedAt &&
+      !item.viewOnce &&
+      !replyPreview &&
+      !!(item.mediaUri || item.mediaEnvelope);
     const failed = isMine && item.status === 'failed';
     // Groups have no per-member delivered/read ticks: show only what the
     // sender can act on (still sending / not sent).
@@ -372,6 +378,9 @@ export const MessageBubble = React.memo(
               { backgroundColor: bubbleColor },
               isMine ? styles.bubbleTailSent : styles.bubbleTailReceived,
               (item.type === 'image' || item.type === 'video') && styles.mediaBubbleContainer,
+              // A photo / video on its own is shown bare — no coloured frame
+              // behind it. (With a reply quote the bubble stays, to hold it.)
+              bareMedia && styles.bareMediaBubble,
             ]}
           >
             {!item.deletedAt && replyPreview && (

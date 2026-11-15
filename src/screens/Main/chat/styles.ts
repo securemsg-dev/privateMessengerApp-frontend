@@ -45,6 +45,14 @@ export const styles = StyleSheet.create({
   bubbleTailSent: { borderBottomRightRadius: 6 },
   bubbleTailReceived: { borderBottomLeftRadius: 6 },
   mediaBubbleContainer: { padding: 4 },
+  bareMediaBubble: {
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    borderRadius: 16,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+  },
   bubbleText: { fontSize: 15, lineHeight: 21 },
 
   /* Per-bubble meta line */

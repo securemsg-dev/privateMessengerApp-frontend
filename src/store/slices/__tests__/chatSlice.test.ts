@@ -3,6 +3,8 @@
  * (thunks talk to the network/SQLite and are covered by manual testing).
  */
 import reducer, {
+  loadMessagesThunk,
+  sendMessageThunk,
   markViewOnceOpened,
   applyReactionEvent,
   clearActiveMessages,
@@ -244,5 +246,67 @@ describe('markViewOnceOpened', () => {
     expect(next.activeMessages[0].openedAt).toBe('2026-11-15T00:00:00Z');
     expect(next.activeMessages[0].mediaEnvelope).toBeNull();
     expect(next.activeMessages[0].mediaUri).toBeUndefined();
+  });
+});
+
+describe('chat list stays in step with the open chat', () => {
+  const conv = {
+    id: 'c1',
+    contactName: 'Alice',
+    contactPrivateNumber: '1234567890',
+    contactProfilePictureKey: null,
+    contactPublicKey: null,
+    lastMessage: 'Hello',
+    lastMessageTime: '2026-06-11T00:00:00Z',
+    lastMessageType: 'text',
+    unreadCount: 0,
+    isSelfChat: false,
+  } as any;
+  const withConv = (messages: Message[] = []) => ({
+    ...reducer(undefined, { type: '@@init' }),
+    conversations: [conv],
+    activeMessages: messages,
+  });
+
+  it('shows my own message in the list as soon as it is sent', () => {
+    const mine = makeMessage({
+      id: 't1', conversationId: 'c1', content: 'Latest msg', timestamp: '2026-06-11T00:01:00Z',
+    });
+    const next = reducer(withConv(), { type: sendMessageThunk.fulfilled.type, payload: mine });
+    expect(next.conversations[0].lastMessage).toBe('Latest msg');
+    expect(next.conversations[0].lastMessageTime).toBe('2026-06-11T00:01:00Z');
+  });
+
+  it('shows a message received in the open chat, with a media label', () => {
+    const photo = makeMessage({
+      id: 's9', conversationId: 'c1', senderId: 'peer', type: 'image',
+      content: 'Photo', timestamp: '2026-06-11T00:02:00Z',
+    });
+    const next = reducer(withConv(), upsertMessage({ message: photo }));
+    expect(next.conversations[0].lastMessage).toBe('📷 Photo');
+    expect(next.conversations[0].lastMessageSenderId).toBe('peer');
+  });
+
+  it('never moves the preview back to an older message', () => {
+    const old = makeMessage({
+      id: 's1', conversationId: 'c1', content: 'old', timestamp: '2026-06-10T00:00:00Z',
+    });
+    const next = reducer(withConv(), upsertMessage({ message: old }));
+    expect(next.conversations[0].lastMessage).toBe('Hello');
+  });
+});
+
+describe('loadMessages keeps media already on screen', () => {
+  it('carries downloaded files over to the fresh server page', () => {
+    const cached = makeMessage({ id: 'p1', type: 'image', mediaUri: 'file:///cache/p1.jpg' });
+    const state = { ...stateWith(cached) };
+    const fresh = makeMessage({ id: 'p1', type: 'image', mediaUri: undefined, status: 'read' });
+    const next = reducer(state, {
+      type: loadMessagesThunk.fulfilled.type,
+      payload: { messages: [fresh, makeMessage({ id: 'p2' })], nextCursor: null },
+    });
+    expect(next.activeMessages[0].mediaUri).toBe('file:///cache/p1.jpg');
+    expect(next.activeMessages[0].status).toBe('read');
+    expect(next.activeMessages[1].mediaUri).toBeUndefined();
   });
 });
