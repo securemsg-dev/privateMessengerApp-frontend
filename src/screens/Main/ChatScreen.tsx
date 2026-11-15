@@ -2,14 +2,13 @@ import React, { useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Keyboard,
-  KeyboardAvoidingView,
   NativeSyntheticEvent,
-  Platform,
   TextInput,
   TextInputSelectionChangeEventData,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { useSelector, useDispatch } from 'react-redux';
 import * as Haptics from 'expo-haptics';
@@ -70,7 +69,6 @@ import { MessageList } from './chat/MessageList';
 import { ChatComposer } from './chat/ChatComposer';
 import { RecordingBar } from './chat/RecordingBar';
 import { PreviewBar } from './chat/PreviewBar';
-import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import { useEffect } from 'react';
 
 type ChatScreenParams = {
@@ -90,7 +88,7 @@ export const ChatScreen = () => {
   const route = useRoute<RouteProp<ChatScreenParams, 'ChatScreen'>>();
   const dispatch = useDispatch<AppDispatch>();
   const { bottom: bottomInset } = useSafeAreaInsets();
-  const keyboardHeight = useKeyboardHeight();
+  const keyboardVisible = useKeyboardState((s) => s.isVisible);
 
   const {
     conversationId,
@@ -400,27 +398,17 @@ export const ChatScreen = () => {
         />
       </SafeAreaView>
 
-      {/* iOS: KAV `padding` tracks keyboardWillShow/Hide for smooth animated
-          avoidance (its bottom edge is the screen bottom, so no
-          keyboardVerticalOffset needed).
-
-          Android: KAV is disabled and the OS handles avoidance via
-          android.softwareKeyboardLayoutMode: "pan" (app.json). Three
-          approaches were tried on SDK 54 edge-to-edge and only pan is usable:
-            • keyboardHeight-sized spacer → collapsed (keyboardDidShow can
-              report height 0 under edge-to-edge), composer hid behind the
-              keyboard;
-            • KAV behavior="padding" → correct on show, but left a large stale
-              gap after dismissal (device-confirmed twice);
-            • pan → composer always correct; cost is that the window shifts, so
-              the header scrolls off while typing.
-          Revisit with react-native-keyboard-controller (needs reanimated +
-          worklets + a babel plugin) when there's room to verify it properly. */}
+      {/* Keyboard avoidance uses react-native-keyboard-controller's KAV on both
+          platforms. It reads the real keyboard frame from native code, so it
+          works under SDK 54 edge-to-edge, where React Native's own
+          Keyboard events are unreliable on Android. Before this, Android
+          used the window "pan" mode, which pushed the header off-screen while
+          typing; RN's KAV left a stale gap after dismissal, and a spacer
+          sized from keyboardDidShow collapsed because the height could be 0.
+          The bottom edge of this KAV is the screen bottom, so no
+          keyboardVerticalOffset is needed. */}
       <ConnectionBanner state={connectionState} colors={colors} />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <MessageList
           messages={messages}
           senderId={senderId}
@@ -497,18 +485,13 @@ export const ChatScreen = () => {
           </>
         )}
 
-        {/* The keyboard itself is handled per-platform, never by this spacer:
-            iOS by the KAV `padding` above, Android by the window pan
-            (android.softwareKeyboardLayoutMode: "pan" in app.json). Under
-            SDK 54 edge-to-edge, keyboardDidShow's endCoordinates.height is
-            unreliable on Android — it can report 0, which collapsed the old
-            height-driven spacer and left the composer behind the keyboard.
-            So the spacer now only reserves the home-indicator / nav-bar inset
-            while the keyboard is closed, and collapses while it is open (the
-            keyboard already covers that area). */}
+        {/* The keyboard is handled by the KAV above, never by this spacer. It
+            only reserves the home-indicator / nav-bar inset while the keyboard
+            is closed, and collapses while it is open, because the keyboard
+            already covers that area. */}
         <View
           style={{
-            height: keyboardHeight > 0 ? 0 : bottomInset,
+            height: keyboardVisible ? 0 : bottomInset,
             backgroundColor: colors.background,
           }}
         />

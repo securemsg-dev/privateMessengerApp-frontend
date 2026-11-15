@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   TextInput,
   Switch,
@@ -12,6 +11,7 @@ import {
   Alert,
   Share,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -212,7 +212,12 @@ export const ProfileScreen = () => {
         </View>
       </SafeAreaView>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      {/* Scrolls the focused field (name, bio) clear of the keyboard. */}
+      <KeyboardAwareScrollView
+        contentContainerStyle={styles.scrollContent}
+        bottomOffset={24}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* Avatar */}
         <View style={styles.avatarSection}>
           <TouchableOpacity
@@ -308,7 +313,7 @@ export const ProfileScreen = () => {
             <Ionicons name="chevron-forward" size={16} color={colors.border} />
           </TouchableOpacity>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Sign Out bottom sheet */}
       <BottomSheet visible={showSignOut} onClose={() => setShowSignOut(false)}>
