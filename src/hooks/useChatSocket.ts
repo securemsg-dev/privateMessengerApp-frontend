@@ -1,4 +1,5 @@
 import { MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { Alert } from 'react-native';
 import { AppDispatch } from '../store';
 import {
   applyReactionEvent,
@@ -18,6 +19,9 @@ import { saveMessage as saveMessageLocal } from '../services/database';
 import { MediaEnvelope, parseMediaEnvelope } from '../services/crypto';
 import { CryptoConv, decryptFor } from '../services/conversationCrypto';
 import { Outbox } from '../services/outbox';
+
+/** Server refused a view-once send: the recipient's app predates view-once. */
+export const VIEW_ONCE_RECIPIENT_OUTDATED = 'view_once_recipient_outdated';
 
 export function useChatSocket(
   conversationId: string,
@@ -121,6 +125,15 @@ export function useChatSocket(
         return;
       }
       if (event.type === 'error') {
+        // The bubble just turns "Not sent"; this one needs a reason, since
+        // retrying can't help until the other person updates their app.
+        if (event.code === VIEW_ONCE_RECIPIENT_OUTDATED) {
+          Alert.alert(
+            "Couldn't send view-once",
+            event.detail ||
+              'They need to update Cricchat to receive view-once photos and videos.',
+          );
+        }
         void outboxRef.current?.handleError(event);
         return;
       }

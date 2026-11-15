@@ -528,10 +528,14 @@ export function createConversationApi(otherPrivateNumber: string): Promise<Conve
 /**
  * GET /conversations — list all conversations the current user is part of.
  * include_groups=true also marks this account as running a groups-capable
- * build (so others can add it to groups); older backends ignore it.
+ * build (so others can add it to groups); view_once=true does the same for
+ * view-once media (the server refuses view-once sends to older builds,
+ * which would show the photo as an ordinary one). Older backends ignore both.
  */
+export const LIST_CONVERSATIONS_PATH = '/conversations?include_groups=true&view_once=true';
+
 export function listConversationsApi(): Promise<ConversationDTO[]> {
-  return requestWithRefresh<ConversationDTO[]>('/conversations?include_groups=true', { auth: true });
+  return requestWithRefresh<ConversationDTO[]>(LIST_CONVERSATIONS_PATH, { auth: true });
 }
 
 /** GET /conversations/{id} — one conversation (refresh after group changes). */
