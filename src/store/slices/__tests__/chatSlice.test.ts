@@ -397,6 +397,13 @@ describe('chat list refresh policy', () => {
     expect(s.conversationsStaleAt).toBe(NOW + 5);
   });
 
+  it('a failed server load keeps the chats on screen instead of blanking the list', () => {
+    const before = { ...base(), conversations: [serverConv], conversationsFetchedAt: NOW - 60_000 };
+    const s = reducer(before, loaded({ conversations: [selfConv], complete: false, startedAt: NOW }));
+    expect(s.conversations.map((c) => c.id)).toEqual(['self_me', 'c1']);
+    expect(s.conversationsFetchedAt).toBe(NOW - 60_000); // not counted as fresh
+  });
+
   it('marking stale, and delete-for-everyone, make the list re-fetch', () => {
     expect(reducer(base(), markConversationsStale()).conversationsStaleAt).not.toBeNull();
     const s = reducer(

@@ -1110,8 +1110,17 @@ const chatSlice = createSlice({
       .addCase(loadConversationsThunk.fulfilled, (state, action) => {
         const { conversations, complete, startedAt } = action.payload;
         state.status = 'idle';
-        state.conversations = conversations;
-        if (complete) state.conversationsFetchedAt = startedAt;
+        if (complete) {
+          state.conversations = conversations;
+          state.conversationsFetchedAt = startedAt;
+        } else {
+          // Server unreachable: refresh the self-chats but keep the server
+          // rows already on screen — never blank the list for a network blip.
+          state.conversations = [
+            ...conversations,
+            ...state.conversations.filter((c) => !c.isSelfChat),
+          ];
+        }
         // Covered by this attempt (a failed one too — reconnecting marks the
         // list stale again, and retrying here would loop while offline).
         if (state.conversationsStaleAt !== null && state.conversationsStaleAt <= startedAt) {
