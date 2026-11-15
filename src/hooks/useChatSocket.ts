@@ -1,10 +1,11 @@
-import { MutableRefObject, useCallback, useEffect, useRef } from 'react';
+import { MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { AppDispatch } from '../store';
 import {
   applyReactionEvent,
   clearActiveMessages,
   effectiveType,
   markMessageDeletedForEveryone,
+  markViewOnceOpened,
   mediaPlaceholder,
   Message,
   refreshConversationThunk,
@@ -12,7 +13,7 @@ import {
   updateMessageStatus,
   upsertMessage,
 } from '../store/slices/chatSlice';
-import { ChatSocket, ServerEvent, ServerMessageEvent } from '../services/socket';
+import { ChatSocket, ConnectionState, ServerEvent, ServerMessageEvent } from '../services/socket';
 import { saveMessage as saveMessageLocal } from '../services/database';
 import { MediaEnvelope, parseMediaEnvelope } from '../services/crypto';
 import { CryptoConv, decryptFor } from '../services/conversationCrypto';
@@ -32,6 +33,10 @@ export function useChatSocket(
   const socketRef = useRef<ChatSocket | null>(null);
   const senderIdRef = useRef(senderId);
   const ackedReadRef = useRef<Set<string>>(new Set());
+  // Self-chat has no socket, so it is always "open" (never shows the banner).
+  const [connectionState, setConnectionState] = useState<ConnectionState>(
+    isSelfChat ? 'open' : 'connecting',
+  );
 
   useEffect(() => {
     senderIdRef.current = senderId;
@@ -63,7 +68,13 @@ export function useChatSocket(
       conversationId: event.conversation_id,
       senderId: event.sender_id,
       receiverId: '',
-      content: envelope ? mediaPlaceholder(envelope.mime) : plaintext,
+      content: event.self_destruct
+        ? event.message_type === 'video'
+          ? 'Video'
+          : 'Photo'
+        : envelope
+        ? mediaPlaceholder(envelope.mime)
+        : plaintext,
       type: effectiveType(event.message_type, envelope),
       timestamp: event.timestamp,
       status: 'sent',
@@ -75,6 +86,7 @@ export function useChatSocket(
       deletedBy: null,
       mediaEnvelope: envelope,
       senderName: event.sender_display_name ?? null,
+      ...(event.self_destruct ? { viewOnce: true, openedAt: null } : {}),
     };
 
     if (isMine) {
@@ -85,6 +97,8 @@ export function useChatSocket(
     }
 
     dispatch(upsertMessage({ message }));
+    // View-once: nothing is stored or downloaded until the user opens it.
+    if (message.viewOnce) return;
     void saveMessageLocal(
       message.id,
       message.conversationId,
@@ -156,6 +170,12 @@ export function useChatSocket(
         );
         return;
       }
+      if (event.type === 'view_once_opened') {
+        dispatch(
+          markViewOnceOpened({ messageId: event.message_id, timestamp: event.timestamp }),
+        );
+        return;
+      }
       if (event.type === 'deletion') {
         dispatch(
           markMessageDeletedForEveryone({
@@ -180,9 +200,16 @@ export function useChatSocket(
     const sock = new ChatSocket(conversationId);
     socketRef.current = sock;
     const unsubEvent = sock.onEvent(handleSocketEvent);
+    const unsubState = sock.onState((s) => {
+      setConnectionState(s);
+      // Queued frames were just flushed — restart their "not sent" clocks.
+      if (s === 'open') outboxRef.current?.onSocketOpen();
+    });
     void sock.connect();
     return () => {
       unsubEvent();
+      unsubState();
+      outboxRef.current?.dispose();
       sock.close();
       socketRef.current = null;
       dispatch(clearActiveMessages());
@@ -190,5 +217,5 @@ export function useChatSocket(
     };
   }, [conversationId, isSelfChat, dispatch, handleSocketEvent]);
 
-  return { socketRef, senderIdRef, ackedReadRef };
+  return { socketRef, senderIdRef, ackedReadRef, connectionState };
 }

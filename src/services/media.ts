@@ -276,6 +276,19 @@ function extensionFor(mime: string): string {
  * skips re-download. The OS may evict the cache between runs — that's fine,
  * we just rebuild on next call.
  */
+/**
+ * Remove a decrypted media file from the local cache. Used for view-once
+ * media, which must not stay on the device after it has been shown.
+ */
+export async function discardLocalMedia(uri: string | undefined): Promise<void> {
+  if (!uri) return;
+  try {
+    await FileSystem.deleteAsync(uri, { idempotent: true });
+  } catch {
+    /* best-effort */
+  }
+}
+
 export async function downloadAndDecryptMedia(
   envelope: MediaEnvelope,
 ): Promise<string> {

@@ -38,6 +38,8 @@ export interface MediaViewerItem {
   /** ISO timestamp shown under the title. */
   timestamp?: string;
   mime?: string;
+  /** View-once media: no sharing, and a note that it disappears on close. */
+  viewOnce?: boolean;
 }
 
 /** Native player for a downloaded video (own component: hooks need a uri). */
@@ -299,15 +301,27 @@ export const MediaViewerModal = ({ item, onClose }: Props) => {
               </Text>
               {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
             </View>
-            <Pressable
-              onPress={handleShare}
-              disabled={!item?.uri}
-              hitSlop={12}
-              style={[styles.iconBtn, !item?.uri && { opacity: 0.4 }]}
-              accessibilityLabel="Share"
-            >
-              <Ionicons name="share-outline" size={24} color="#fff" />
-            </Pressable>
+            {item?.viewOnce ? (
+              <View style={styles.iconBtn} />
+            ) : (
+              <Pressable
+                onPress={handleShare}
+                disabled={!item?.uri}
+                hitSlop={12}
+                style={[styles.iconBtn, !item?.uri && { opacity: 0.4 }]}
+                accessibilityLabel="Share"
+              >
+                <Ionicons name="share-outline" size={24} color="#fff" />
+              </Pressable>
+            )}
+          </View>
+        )}
+        {item?.viewOnce && (
+          <View style={[styles.viewOnceNote, { paddingBottom: insets.bottom + 16 }]}>
+            <Ionicons name="eye-off-outline" size={16} color="#fff" />
+            <Text style={styles.viewOnceNoteText}>
+              This {isVideo ? 'video' : 'photo'} disappears when you close it
+            </Text>
           </View>
         )}
       </GestureHandlerRootView>
@@ -334,4 +348,18 @@ const styles = StyleSheet.create({
   title: { color: '#fff', fontSize: 16, fontWeight: '600' },
   subtitle: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 2 },
   errorText: { color: '#fff', fontSize: 15, paddingHorizontal: 24, textAlign: 'center' },
+  viewOnceNote: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingTop: 12,
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  viewOnceNoteText: { color: '#fff', fontSize: 13 },
 });

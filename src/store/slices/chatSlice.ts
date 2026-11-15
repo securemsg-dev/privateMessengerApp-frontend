@@ -51,6 +51,8 @@ export interface Conversation {
   contactProfilePictureKey: string | null;
   /** Peer's Curve25519 public key (Base64). Null until they upload one. */
   contactPublicKey: string | null;
+  /** Peer's profile bio (1:1 only). */
+  contactBio?: string | null;
   lastMessage: string;
   lastMessageTime: string;
   lastMessageType: MessageType;
@@ -126,7 +128,8 @@ export interface Message {
   type: MessageType;
   mediaUri?: string;
   timestamp: string;
-  status: 'sent' | 'delivered' | 'read' | 'failed';
+  /** 'sending' = optimistic row not yet confirmed by the server echo. */
+  status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 
   // Phase C.2 — per-message metadata
   reactions: MessageReaction[];
@@ -139,6 +142,14 @@ export interface Message {
   // there's no separate flag for it.
   deletedAt: string | null;
   deletedBy: string | null;
+
+  /**
+   * View-once photo/video: the recipient may open it a single time. It is
+   * never auto-downloaded, cached or shown as a preview. `openedAt` is set
+   * once it has been opened (the media is then gone for both sides).
+   */
+  viewOnce?: boolean;
+  openedAt?: string | null;
 
   // Phase D — encrypted-media metadata. When set, the message body is a
   // pointer (downloadUrl + key + nonce) rather than text. `mediaUri` is
@@ -175,6 +186,12 @@ interface ChatState {
   /** True while an older page is being fetched — drives the top spinner and
    *  stops onEndReached from double-firing. */
   loadingOlder: boolean;
+  /**
+   * Names the user gave their contacts, keyed by private number. Kept on this
+   * device only (never sent to the server) and shown instead of the contact's
+   * own display name.
+   */
+  contactNames: Record<string, string>;
 }
 
 const initialState: ChatState = {
@@ -185,6 +202,7 @@ const initialState: ChatState = {
   activeConversationId: null,
   messagesCursor: null,
   loadingOlder: false,
+  contactNames: {},
 };
 
 const isSelfChatId = (conversationId: string) =>
@@ -285,6 +303,7 @@ export async function conversationFromDTO(
     contactPrivateNumber: other?.private_number || '',
     contactProfilePictureKey: other?.profile_picture_key ?? null,
     contactPublicKey: peerKey,
+    contactBio: other?.bio ?? null,
     lastMessage: '',
     ...prefs,
     isGroup: false,
@@ -401,18 +420,28 @@ async function decryptServerMessage(
   // MediaEnvelope (system messages come back already described). We detect
   // media and stash the envelope; ChatScreen downloads the bytes off the
   // critical path.
-  const decrypted = await decryptFor(
-    crypto,
-    {
-      payload: m.encrypted_payload,
-      messageType: m.message_type,
-      senderId: m.sender_id,
-      senderPublicKey: m.sender_public_key,
-    },
-    myUserId,
-  );
+  // An opened view-once message has no payload left — nothing to decrypt.
+  const viewOnceGone = m.self_destruct && (!!m.opened_at || !m.encrypted_payload);
+  const decrypted = viewOnceGone
+    ? ''
+    : await decryptFor(
+        crypto,
+        {
+          payload: m.encrypted_payload,
+          messageType: m.message_type,
+          senderId: m.sender_id,
+          senderPublicKey: m.sender_public_key,
+        },
+        myUserId,
+      );
   const envelope = m.message_type === 'system' ? null : parseMediaEnvelope(decrypted);
-  const content = envelope ? mediaPlaceholder(envelope.mime) : decrypted;
+  const content = m.self_destruct
+    ? m.message_type === 'video'
+      ? 'Video'
+      : 'Photo'
+    : envelope
+    ? mediaPlaceholder(envelope.mime)
+    : decrypted;
 
   let replyPreview: ReplyPreview | null = null;
   if (m.reply_preview) {
@@ -458,6 +487,7 @@ async function decryptServerMessage(
     replyPreview,
     deletedAt: m.deleted_at,
     deletedBy: m.deleted_by,
+    ...(m.self_destruct ? { viewOnce: true, openedAt: m.opened_at ?? null } : {}),
     mediaEnvelope: envelope,
     senderName: m.sender_display_name ?? null,
   };
@@ -514,7 +544,11 @@ export const loadMessagesThunk = createAsyncThunk<
       ordered.map((m) => decryptServerMessage(m, crypto, myUserId)),
     );
     // Cache decrypted history (first page only) so re-opening paints instantly.
-    void cacheSet(CACHE_KEYS.messages(conversationId), decrypted);
+    // View-once media keys never go into the on-disk cache.
+    void cacheSet(
+      CACHE_KEYS.messages(conversationId),
+      decrypted.map((d) => (d.viewOnce ? { ...d, mediaEnvelope: null } : d)),
+    );
     return { messages: decrypted, nextCursor: page.next_cursor };
   },
 );
@@ -596,6 +630,11 @@ export const sendMessageThunk = createAsyncThunk(
     type?: MessageType;
     mediaUri?: string;
     id?: string;
+    /** True when the message still has to reach the server (shows the
+     *  "Sending" clock until the echo). Self-chat is local-only → false. */
+    pending?: boolean;
+    /** View-once photo/video (no local preview is kept). */
+    viewOnce?: boolean;
     /** If set, this message is a reply to another message (Phase C.2). */
     replyTo?: ReplyPreview | null;
     /** Phase D — encrypted-media envelope for non-text messages. */
@@ -625,7 +664,7 @@ export const sendMessageThunk = createAsyncThunk(
       type,
       mediaUri: payload.mediaUri,
       timestamp: new Date().toISOString(),
-      status: 'sent',
+      status: payload.pending ? 'sending' : 'sent',
       reactions: [],
       isStarred: false,
       replyToId: payload.replyTo?.id ?? null,
@@ -634,6 +673,7 @@ export const sendMessageThunk = createAsyncThunk(
       deletedBy: null,
       mediaEnvelope: payload.mediaEnvelope ?? null,
       ...(payload.mediaMeta ? { mediaMeta: payload.mediaMeta } : {}),
+      ...(payload.viewOnce ? { viewOnce: true, openedAt: null } : {}),
     };
     return message;
   },
@@ -656,6 +696,59 @@ export const deleteSelectedConversationsThunk = createAsyncThunk<
   }
   return ids;
 });
+
+/* ── Custom contact names (device-only) ────────────────── */
+
+export const CONTACT_NAME_MAX = 40;
+
+export const loadContactNamesThunk = createAsyncThunk('chat/loadContactNames', async () => {
+  const names = await cacheGet<Record<string, string>>(CACHE_KEYS.contactNames);
+  return names && typeof names === 'object' ? names : {};
+});
+
+/** Set (or, with an empty name, clear) the user's own name for a contact. */
+export const setContactNameThunk = createAsyncThunk<
+  Record<string, string>,
+  { privateNumber: string; name: string },
+  { state: { chat: ChatState } }
+>('chat/setContactName', async ({ privateNumber, name }, { getState }) => {
+  const next = { ...getState().chat.contactNames };
+  const clean = name.trim().replace(/\s+/g, ' ').slice(0, CONTACT_NAME_MAX);
+  if (clean) next[privateNumber] = clean;
+  else delete next[privateNumber];
+  await cacheSet(CACHE_KEYS.contactNames, next);
+  return next;
+});
+
+/* ── Delivery status ordering ──────────────────────────── */
+
+const STATUS_RANK: Record<Message['status'], number> = {
+  failed: 0,
+  sending: 1,
+  sent: 2,
+  delivered: 3,
+  read: 4,
+};
+
+/**
+ * Next status for a message. Ticks only move forward (events can arrive out
+ * of order: a late 'delivered' must not undo 'read'), and 'failed' can't
+ * overwrite a message the server already confirmed. `force` allows the two
+ * deliberate backwards moves: failed → sending (retry) and failed → sent
+ * (the echo finally arrived).
+ */
+export function advanceStatus(
+  current: Message['status'],
+  next: Message['status'],
+  force = false,
+): Message['status'] {
+  if (next === 'failed') return STATUS_RANK[current] >= STATUS_RANK.sent ? current : 'failed';
+  // A receipt for a "failed" message means it did get through after all.
+  if (current === 'failed') {
+    return force || STATUS_RANK[next] >= STATUS_RANK.delivered ? next : current;
+  }
+  return STATUS_RANK[next] >= STATUS_RANK[current] ? next : current;
+}
 
 /* ── Slice ─────────────────────────────────────────────── */
 
@@ -696,7 +789,9 @@ const chatSlice = createSlice({
           state.activeMessages[idx] = {
             ...state.activeMessages[idx],
             timestamp: message.timestamp,
-            status: message.status,
+            // The echo proves it reached the server; never downgrade a
+            // delivered/read tick that raced ahead of it.
+            status: advanceStatus(state.activeMessages[idx].status, message.status, true),
           };
           return;
         }
@@ -712,10 +807,12 @@ const chatSlice = createSlice({
     /** Update a single message's delivery status (delivered / read tick). */
     updateMessageStatus(
       state,
-      action: PayloadAction<{ id: string; status: Message['status'] }>,
+      action: PayloadAction<{ id: string; status: Message['status']; force?: boolean }>,
     ) {
       const msg = state.activeMessages.find((m) => m.id === action.payload.id);
-      if (msg) msg.status = action.payload.status;
+      if (msg) {
+        msg.status = advanceStatus(msg.status, action.payload.status, !!action.payload.force);
+      }
     },
 
     /**
@@ -868,6 +965,19 @@ const chatSlice = createSlice({
      * message at the local file URI. Subsequent re-renders read from
      * disk instead of re-decrypting.
      */
+    /** A view-once photo/video was opened: drop every trace of the media. */
+    markViewOnceOpened(
+      state,
+      action: PayloadAction<{ messageId: string; timestamp: string }>,
+    ) {
+      const msg = state.activeMessages.find((m) => m.id === action.payload.messageId);
+      if (!msg) return;
+      msg.viewOnce = true;
+      msg.openedAt = action.payload.timestamp;
+      msg.mediaEnvelope = null;
+      msg.mediaUri = undefined;
+    },
+
     hydrateMessageMedia(
       state,
       action: PayloadAction<{ messageId: string; localUri: string }>,
@@ -880,6 +990,12 @@ const chatSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      .addCase(loadContactNamesThunk.fulfilled, (state, action) => {
+        state.contactNames = action.payload;
+      })
+      .addCase(setContactNameThunk.fulfilled, (state, action) => {
+        state.contactNames = action.payload;
+      })
       .addCase(refreshConversationThunk.fulfilled, (state, action) => {
         const { id, conversation } = action.payload;
         const idx = state.conversations.findIndex((c) => c.id === id);
@@ -979,6 +1095,7 @@ export const {
   removeMessage,
   markMessageDeletedForEveryone,
   hydrateMessageMedia,
+  markViewOnceOpened,
 } = chatSlice.actions;
 
 /**

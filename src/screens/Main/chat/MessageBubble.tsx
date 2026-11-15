@@ -23,6 +23,8 @@ interface Colors {
   border: string;
   primary: string;
   background: string;
+  /** Accent tuned for text/icons on the background (falls back to primary). */
+  accent?: string;
   error?: string;
   danger?: string;
 }
@@ -43,7 +45,23 @@ interface Props {
   onReply: (m: Message) => void;
   /** Tap on a downloaded image → full-screen viewer. */
   onOpenMedia: (m: Message) => void;
+  /** Tap on a "Not sent" message → try sending it again. */
+  onRetry?: (m: Message) => void;
+  /** Tap on an unopened view-once photo/video I received. */
+  onOpenViewOnce?: (m: Message) => void;
 }
+
+/** Tick + label under my own messages, one per delivery state. */
+const STATUS_UI: Record<
+  Message['status'],
+  { icon: React.ComponentProps<typeof Ionicons>['name']; label: string }
+> = {
+  sending: { icon: 'time-outline', label: 'Sending…' },
+  sent: { icon: 'checkmark', label: 'Sent' },
+  delivered: { icon: 'checkmark-done', label: 'Delivered' },
+  read: { icon: 'checkmark-done', label: 'Read' },
+  failed: { icon: 'alert-circle-outline', label: 'Not sent' },
+};
 
 const formatBubbleTime = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -89,13 +107,17 @@ export const MessageBubble = React.memo(
     onLongPress,
     onReply,
     onOpenMedia,
+    onRetry,
+    onOpenViewOnce,
   }: Props) => {
     const bubbleColor = isMine ? colors.primary : colors.surface;
     const textColor = isMine ? ON_PRIMARY : colors.text;
 
-    const reversed = [...messages].reverse();
-    const next = reversed[index - 1];
-    const showDay = !next || !sameDay(item.timestamp, next.timestamp);
+    // `index` is the position in the inverted list, so the chronologically
+    // PREVIOUS message is index + 1. The day label goes above the first
+    // message of each day.
+    const prev = messages[messages.length - 2 - index];
+    const showDay = !prev || !sameDay(item.timestamp, prev.timestamp);
 
     const dayLabel = (() => {
       if (!showDay) return null;
@@ -131,6 +153,37 @@ export const MessageBubble = React.memo(
           >
             🗑  {wipedByMe ? 'You deleted this message' : 'This message was deleted'}
           </Text>
+        );
+      }
+      if (item.viewOnce) {
+        // View-once photo/video: never a preview, just what it is and whether
+        // it has been opened.
+        const opened = !!item.openedAt;
+        const fg = isMine ? ON_PRIMARY : colors.text;
+        const dim = isMine ? 'rgba(255,255,255,0.75)' : colors.textSecondary;
+        const tone = opened ? dim : fg;
+        const hint = opened
+          ? null
+          : !isMine && item.mediaEnvelope
+          ? 'Tap to view once'
+          : 'View once';
+        return (
+          <View style={styles.viewOnceRow}>
+            <View
+              style={[
+                styles.viewOnceBadge,
+                { borderColor: tone, borderStyle: opened ? 'solid' : 'dashed' },
+              ]}
+            >
+              <Text style={[styles.viewOnceBadgeText, { color: tone }]}>1</Text>
+            </View>
+            <View>
+              <Text style={[styles.bubbleText, { color: tone, fontWeight: '600' }]}>
+                {opened ? 'Opened' : item.type === 'video' ? 'Video' : 'Photo'}
+              </Text>
+              {hint && <Text style={[styles.viewOnceHint, { color: dim }]}>{hint}</Text>}
+            </View>
+          </View>
         );
       }
       if (item.type === 'image' && (item.mediaUri || item.mediaEnvelope)) {
@@ -259,18 +312,31 @@ export const MessageBubble = React.memo(
     if (item.type === 'system') {
       return (
         <View>
+          {showDay && dayLabel && <DaySeparator label={dayLabel} colors={colors} />}
           <View style={styles.systemWrap}>
             <Text style={[styles.systemText, { color: colors.textSecondary, backgroundColor: colors.surface }]}>
               {item.content}
             </Text>
           </View>
-          {showDay && dayLabel && <DaySeparator label={dayLabel} colors={colors} />}
         </View>
       );
     }
 
+    const failed = isMine && item.status === 'failed';
+    // Groups have no per-member delivered/read ticks: show only what the
+    // sender can act on (still sending / not sent).
+    const showStatus =
+      isMine && (!isGroup || item.status === 'failed' || item.status === 'sending');
+    const statusUi = STATUS_UI[item.status] ?? STATUS_UI.sent;
+    const statusColor = failed
+      ? colors.danger ?? colors.error ?? '#e74c3c'
+      : item.status === 'read'
+      ? colors.accent ?? colors.primary
+      : colors.textSecondary;
+
     return (
       <View>
+        {showDay && dayLabel && <DaySeparator label={dayLabel} colors={colors} />}
         {showSenderName && (
           <Text
             numberOfLines={1}
@@ -289,9 +355,15 @@ export const MessageBubble = React.memo(
             // Tap-to-view lives on this outer Pressable (not a nested one) so
             // long-press still reaches the action sheet.
             onPress={
-              !item.deletedAt &&
-              ((item.type === 'image' && item.mediaUri) ||
-                (item.type === 'video' && (item.mediaUri || item.mediaEnvelope)))
+              item.deletedAt
+                ? undefined
+                : item.viewOnce
+                ? // Only the recipient can open it, and only once.
+                  !isMine && !item.openedAt && item.mediaEnvelope && onOpenViewOnce
+                  ? () => onOpenViewOnce(item)
+                  : undefined
+                : (item.type === 'image' && item.mediaUri) ||
+                  (item.type === 'video' && (item.mediaUri || item.mediaEnvelope))
                 ? () => onOpenMedia(item)
                 : undefined
             }
@@ -393,37 +465,41 @@ export const MessageBubble = React.memo(
         )}
 
         <View style={[styles.metaRow, isMine ? styles.metaRight : styles.metaLeft]}>
-          <Text style={[styles.metaText, { color: colors.textSecondary }]}>
-            {formatBubbleTime(item.timestamp)}
-            {/* Groups have no per-member delivered/read ticks — only show
-                a problem (NOT SENT). */}
-            {isMine && (!isGroup || item.status === 'failed') && (
-              <>
-                {'  ·  '}
-                <Text
-                  style={{
-                    color:
-                      item.status === 'read'
-                        ? colors.primary
-                        : item.status === 'failed'
-                        ? colors.danger ?? colors.error ?? '#e74c3c'
-                        : colors.textSecondary,
-                  }}
-                >
-                  {item.status === 'sent'
-                    ? 'SENT'
-                    : item.status === 'delivered'
-                    ? 'DELIVERED'
-                    : item.status === 'failed'
-                    ? 'NOT SENT'
-                    : 'READ'}
-                </Text>
-              </>
-            )}
-          </Text>
+          {failed && onRetry ? (
+            <TouchableOpacity
+              onPress={() => onRetry(item)}
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+              accessibilityRole="button"
+              accessibilityLabel="Message not sent. Tap to retry."
+              style={styles.statusRow}
+            >
+              <Ionicons name={statusUi.icon} size={13} color={statusColor} />
+              <Text style={[styles.metaText, { color: statusColor }]}>
+                Not sent · Tap to retry
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View
+              style={styles.statusRow}
+              accessible
+              accessibilityLabel={
+                showStatus
+                  ? `${formatBubbleTime(item.timestamp)}, ${statusUi.label}`
+                  : formatBubbleTime(item.timestamp)
+              }
+            >
+              <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                {item.status === 'sending' && isMine ? '' : formatBubbleTime(item.timestamp)}
+              </Text>
+              {showStatus && (
+                <>
+                  <Ionicons name={statusUi.icon} size={13} color={statusColor} />
+                  <Text style={[styles.metaText, { color: statusColor }]}>{statusUi.label}</Text>
+                </>
+              )}
+            </View>
+          )}
         </View>
-
-        {showDay && dayLabel && <DaySeparator label={dayLabel} colors={colors} />}
       </View>
     );
   },

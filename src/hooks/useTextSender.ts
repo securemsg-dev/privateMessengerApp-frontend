@@ -57,6 +57,7 @@ export function useTextSender(
         content: trimmed,
         type: 'text',
         replyTo: replyPreview,
+        pending: !isSelfChat,
       }),
     );
 

@@ -27,7 +27,7 @@ const ON_PRIMARY = '#ffffff';
 // Action button colors — solid fills picked to read on white + dark backgrounds.
 // Kept on-brand: blue (Pin), muted blue-grey (Unread), slate (Mute), red (Delete).
 const ACTION_BG = {
-  pin: '#0088cc',
+  pin: '#4055ac',
   unread: '#5d7c8c',
   mute: '#6e7884',
   delete: '#dc3545',

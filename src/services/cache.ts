@@ -65,4 +65,6 @@ export const CACHE_KEYS = {
   conversations: 'conversations',
   callLog: 'calllog',
   messages: (conversationId: string) => `messages:${conversationId}`,
+  /** The user's own names for contacts (private number → name). Device-only. */
+  contactNames: 'contactnames',
 };

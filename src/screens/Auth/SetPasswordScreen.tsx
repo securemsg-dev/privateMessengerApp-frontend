@@ -72,6 +72,11 @@ export const SetPasswordScreen = () => {
   const [showDeletePw, setShowDeletePw] = useState(false);
   const [showDeletePwConfirm, setShowDeletePwConfirm] = useState(false);
 
+  // Explicit acknowledgements: neither password can be recovered or undone,
+  // so the user must tick each warning before moving on.
+  const [ackNoReset, setAckNoReset] = useState(false);
+  const [ackWipe, setAckWipe] = useState(false);
+
   const loginStrength = useMemo(() => scorePassword(loginPw), [loginPw]);
   const deleteStrength = useMemo(() => scorePassword(deletePw), [deletePw]);
 
@@ -82,8 +87,8 @@ export const SetPasswordScreen = () => {
 
   const canContinue =
     (step === 1) ||
-    (step === 2 && loginOk) ||
-    (step === 3 && finalOk && status !== 'loading');
+    (step === 2 && loginOk && ackNoReset) ||
+    (step === 3 && finalOk && ackWipe && status !== 'loading');
 
   const goNext = async () => {
     if (!canContinue) return;
@@ -166,6 +171,8 @@ export const SetPasswordScreen = () => {
               toggleShowConfirm={() => setShowLoginPwConfirm(!showLoginPwConfirm)}
               strength={loginStrength}
               strengthColor={strengthColor(loginStrength.score, colors)}
+              acknowledged={ackNoReset}
+              onToggleAck={() => setAckNoReset((v) => !v)}
             />
           )}
 
@@ -183,6 +190,8 @@ export const SetPasswordScreen = () => {
               strength={deleteStrength}
               strengthColor={strengthColor(deleteStrength.score, colors)}
               clashes={!passwordsDiffer && deletePw.length > 0}
+              acknowledged={ackWipe}
+              onToggleAck={() => setAckWipe((v) => !v)}
             />
           )}
 
@@ -314,6 +323,8 @@ const Step2 = ({
   toggleShowConfirm,
   strength,
   strengthColor,
+  acknowledged,
+  onToggleAck,
 }: {
   colors: Colors;
   loginPw: string;
@@ -326,6 +337,8 @@ const Step2 = ({
   toggleShowConfirm: () => void;
   strength: { score: number; label: string };
   strengthColor: string;
+  acknowledged: boolean;
+  onToggleAck: () => void;
 }) => {
   const mismatch = loginPwConfirm.length > 0 && loginPw !== loginPwConfirm;
   return (
@@ -382,6 +395,15 @@ const Step2 = ({
         </View>
       )}
 
+      <WarningAck
+        colors={colors}
+        title="There is no password reset"
+        body="Cricchat has no email or phone number for your account, so nobody can reset this password — not even us. If you forget it, your account and messages cannot be recovered."
+        ackLabel="I understand. I will keep my private number and password somewhere safe."
+        acknowledged={acknowledged}
+        onToggle={onToggleAck}
+      />
+
       {/* Defer-delete-pw card */}
       <View
         style={[
@@ -420,6 +442,8 @@ const Step3 = ({
   strength,
   strengthColor,
   clashes,
+  acknowledged,
+  onToggleAck,
 }: {
   colors: Colors;
   deletePw: string;
@@ -433,6 +457,8 @@ const Step3 = ({
   strength: { score: number; label: string };
   strengthColor: string;
   clashes: boolean;
+  acknowledged: boolean;
+  onToggleAck: () => void;
 }) => {
   const mismatch = deletePwConfirm.length > 0 && deletePw !== deletePwConfirm;
   return (
@@ -496,23 +522,63 @@ const Step3 = ({
         </View>
       )}
 
+      <WarningAck
+        colors={colors}
+        title="This password erases everything"
+        body="Entering the delete password on the lock screen instantly and permanently erases your account, messages and data on this device. There is no confirmation and it cannot be undone. Never type it to unlock the app."
+        ackLabel="I understand that entering this password deletes my account for good."
+        acknowledged={acknowledged}
+        onToggle={onToggleAck}
+      />
+    </View>
+  );
+};
+
+/* ─────────────────────────────────────────────────────────────
+   Warning the user has to tick before continuing
+   ───────────────────────────────────────────────────────────── */
+const WarningAck = ({
+  colors,
+  title,
+  body,
+  ackLabel,
+  acknowledged,
+  onToggle,
+}: {
+  colors: Colors;
+  title: string;
+  body: string;
+  ackLabel: string;
+  acknowledged: boolean;
+  onToggle: () => void;
+}) => {
+  const danger = colors.danger ?? '#c0392b';
+  return (
+    <View>
       <View
-        style={[
-          styles.infoCard,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-        ]}
+        style={[styles.infoCard, { backgroundColor: colors.surface, borderColor: danger }]}
+        accessibilityRole="alert"
       >
-        <Ionicons name="warning-outline" size={20} color={colors.primary} />
+        <Ionicons name="warning-outline" size={20} color={danger} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.infoTitle, { color: colors.text }]}>
-            One-tap account wipe
-          </Text>
-          <Text style={[styles.infoBody, { color: colors.textSecondary }]}>
-            Entering this password on the lock screen instantly erases your account and local data
-            — no dialog.
-          </Text>
+          <Text style={[styles.infoTitle, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.infoBody, { color: colors.textSecondary }]}>{body}</Text>
         </View>
       </View>
+      <TouchableOpacity
+        style={styles.ackRow}
+        onPress={onToggle}
+        activeOpacity={0.7}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: acknowledged }}
+      >
+        <Ionicons
+          name={acknowledged ? 'checkbox' : 'square-outline'}
+          size={24}
+          color={acknowledged ? colors.primary : colors.textSecondary}
+        />
+        <Text style={[styles.ackText, { color: colors.text }]}>{ackLabel}</Text>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -676,6 +742,14 @@ const styles = StyleSheet.create({
   },
   infoTitle: { fontSize: 14, fontWeight: '700', marginBottom: 4 },
   infoBody: { fontSize: 13, lineHeight: 19 },
+  ackRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 2,
+  },
+  ackText: { flex: 1, fontSize: 14, lineHeight: 20 },
 
   serverError: {
     fontSize: 14,

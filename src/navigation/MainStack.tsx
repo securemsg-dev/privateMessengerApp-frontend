@@ -9,6 +9,8 @@ import { CreateGroupScreen } from '../screens/Main/CreateGroupScreen';
 import { GroupInfoScreen } from '../screens/Main/GroupInfoScreen';
 import { ChangePasswordScreen } from '../screens/Main/ChangePasswordScreen';
 import { BlockedUsersScreen } from '../screens/Main/BlockedUsersScreen';
+import { ContactInfoScreen } from '../screens/Main/ContactInfoScreen';
+import { SharedMediaScreen } from '../screens/Main/SharedMediaScreen';
 
 export type MainStackParamList = {
   MainTabs: undefined;
@@ -19,6 +21,10 @@ export type MainStackParamList = {
   CreateGroup: { addToConversationId?: string } | undefined;
   GroupInfo: { conversationId: string };
   BlockedUsers: undefined;
+  /** One-to-one contact details (opened from the chat header). */
+  ContactInfo: { conversationId: string; contactName: string; contactPrivateNumber: string };
+  /** Photos, videos, files, voice and links shared in a chat. */
+  SharedMedia: { conversationId: string; title: string };
   ChatScreen: {
     conversationId: string;
     contactName: string;
@@ -48,6 +54,8 @@ export const MainStack = () => {
       <Stack.Screen name="GroupInfo" component={GroupInfoScreen} />
       <Stack.Screen name="ChatScreen" component={ChatScreen} />
       <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
+      <Stack.Screen name="ContactInfo" component={ContactInfoScreen} />
+      <Stack.Screen name="SharedMedia" component={SharedMediaScreen} />
     </Stack.Navigator>
   );
 };

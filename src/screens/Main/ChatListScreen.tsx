@@ -30,6 +30,7 @@ import {
 } from '../../services/push';
 import {
   loadConversationsThunk,
+  loadContactNamesThunk,
   hydrateConversationsThunk,
   deleteAllConversationsThunk,
   deleteSelectedConversationsThunk,
@@ -82,6 +83,10 @@ export const ChatListScreen = () => {
   const displayName = useSelector((s: RootState) => s.auth.displayName);
   const privateNumber = useSelector((s: RootState) => s.auth.privateNumber);
   const conversations = useSelector((s: RootState) => s.chat.conversations);
+  const contactNames = useSelector((s: RootState) => s.chat.contactNames);
+  /** Display name: the user's own name for a 1:1 contact when they set one. */
+  const nameOf = (c: Conversation) =>
+    (!c.isGroup && !c.isSelfChat && contactNames[c.contactPrivateNumber]) || c.contactName;
 
   const [showNotification, setShowNotification] = useState(false);
   const [dontRemind, setDontRemind] = useState(false);
@@ -110,6 +115,8 @@ export const ChatListScreen = () => {
     // Paint the cached list instantly, then refresh from the network.
     dispatch(hydrateConversationsThunk());
     dispatch(loadConversationsThunk());
+    // The user's own names for contacts (device-only).
+    dispatch(loadContactNamesThunk());
   }, []);
 
   useEffect(() => {
@@ -306,7 +313,7 @@ export const ChatListScreen = () => {
     }
     Alert.alert(
       'Mute notifications',
-      `For how long do you want to mute ${conv.contactName || 'this chat'}?`,
+      `For how long do you want to mute ${nameOf(conv) || 'this chat'}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: '1 hour', onPress: () => setMuteSeconds(conv, 60 * 60) },
@@ -366,7 +373,7 @@ export const ChatListScreen = () => {
     });
     // Show undo toast for 2s
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    setUndoToast({ id: conv.id, name: conv.contactName || 'Chat' });
+    setUndoToast({ id: conv.id, name: nameOf(conv) || 'Chat' });
     undoTimerRef.current = setTimeout(() => commitDelete(conv.id), 2000);
   };
 
@@ -537,7 +544,7 @@ export const ChatListScreen = () => {
         ) : (
           <Avatar
             profilePictureKey={item.contactProfilePictureKey}
-            name={item.contactName || '#'}
+            name={nameOf(item) || '#'}
             size={46}
           />
         )}
@@ -551,7 +558,7 @@ export const ChatListScreen = () => {
               ]}
               numberOfLines={1}
             >
-              {item.contactName || item.id}
+              {nameOf(item) || item.id}
             </Text>
             {isPinned && (
               <View style={styles.pinChip}>

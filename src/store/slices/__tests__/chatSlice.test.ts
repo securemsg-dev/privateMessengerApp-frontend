@@ -3,6 +3,7 @@
  * (thunks talk to the network/SQLite and are covered by manual testing).
  */
 import reducer, {
+  markViewOnceOpened,
   applyReactionEvent,
   clearActiveMessages,
   mediaMetaOf,
@@ -79,13 +80,33 @@ describe('upsertMessage', () => {
 });
 
 describe('updateMessageStatus', () => {
-  it('updates ticks, including the failed state', () => {
-    let state = stateWith(makeMessage());
+  it('moves ticks forward only', () => {
+    let state = stateWith(makeMessage({ status: 'sending' }));
     state = reducer(state, updateMessageStatus({ id: 'm1', status: 'read' }));
     expect(state.activeMessages[0].status).toBe('read');
 
+    // A late 'delivered' (or a stray failure) must not undo 'read'.
+    state = reducer(state, updateMessageStatus({ id: 'm1', status: 'delivered' }));
+    expect(state.activeMessages[0].status).toBe('read');
+    state = reducer(state, updateMessageStatus({ id: 'm1', status: 'failed' }));
+    expect(state.activeMessages[0].status).toBe('read');
+  });
+
+  it('fails a message that is still sending, and retries only when forced', () => {
+    let state = stateWith(makeMessage({ status: 'sending' }));
     state = reducer(state, updateMessageStatus({ id: 'm1', status: 'failed' }));
     expect(state.activeMessages[0].status).toBe('failed');
+
+    state = reducer(state, updateMessageStatus({ id: 'm1', status: 'sending' }));
+    expect(state.activeMessages[0].status).toBe('failed');
+    state = reducer(state, updateMessageStatus({ id: 'm1', status: 'sending', force: true }));
+    expect(state.activeMessages[0].status).toBe('sending');
+  });
+
+  it('a receipt rescues a message wrongly marked failed', () => {
+    let state = stateWith(makeMessage({ status: 'failed' }));
+    state = reducer(state, updateMessageStatus({ id: 'm1', status: 'delivered' }));
+    expect(state.activeMessages[0].status).toBe('delivered');
   });
 
   it('ignores unknown message ids', () => {
@@ -202,5 +223,26 @@ describe('mediaMetaOf', () => {
     });
     expect(mediaMetaOf(m)).toMatchObject({ durationMs: 2000, waveform: [1, 2] });
     expect(mediaMetaOf(makeMessage())).toEqual({});
+  });
+});
+
+describe('markViewOnceOpened', () => {
+  it('drops the media key and local file once a view-once message is opened', () => {
+    const state = stateWith(
+      makeMessage({
+        type: 'image',
+        viewOnce: true,
+        openedAt: null,
+        mediaUri: 'file:///cache/x.jpg',
+        mediaEnvelope: { kind: 'media', blobId: 'b', downloadUrl: 'u', key: 'k', nonce: 'n', mime: 'image/jpeg', sizeBytes: 1 },
+      }),
+    );
+    const next = reducer(
+      state,
+      markViewOnceOpened({ messageId: 'm1', timestamp: '2026-11-15T00:00:00Z' }),
+    );
+    expect(next.activeMessages[0].openedAt).toBe('2026-11-15T00:00:00Z');
+    expect(next.activeMessages[0].mediaEnvelope).toBeNull();
+    expect(next.activeMessages[0].mediaUri).toBeUndefined();
   });
 });

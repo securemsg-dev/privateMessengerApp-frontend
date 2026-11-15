@@ -26,6 +26,10 @@ interface Props {
   onReply: (m: Message) => void;
   onActionSheet: (m: Message, isSent: boolean, rect: BubbleRect) => void;
   onOpenMedia: (m: Message) => void;
+  /** Tap on a "Not sent" message. */
+  onRetry?: (m: Message) => void;
+  /** Tap on an unopened view-once photo/video. */
+  onOpenViewOnce?: (m: Message) => void;
   /** Fetch the next older history page. No-op when history is complete. */
   onLoadOlder?: () => void;
   /** True while an older page is in flight — shows the top spinner. */
@@ -57,6 +61,8 @@ export const MessageList = ({
   onReply,
   onActionSheet,
   onOpenMedia,
+  onRetry,
+  onOpenViewOnce,
   onLoadOlder,
   loadingOlder,
 }: Props) => {
@@ -85,10 +91,12 @@ export const MessageList = ({
           onLongPress={(m, isSent, rect) => onActionSheet(m, isSent, rect as unknown as BubbleRect)}
           onReply={onReply}
           onOpenMedia={onOpenMedia}
+          onRetry={onRetry}
+          onOpenViewOnce={onOpenViewOnce}
         />
       );
     },
-    [senderId, contactName, isGroup, reversed, colors, messages, onReply, onActionSheet, onOpenMedia],
+    [senderId, contactName, isGroup, reversed, colors, messages, onReply, onActionSheet, onOpenMedia, onRetry, onOpenViewOnce],
   );
 
   // The list is inverted, so the "footer" renders at the TOP of the thread —

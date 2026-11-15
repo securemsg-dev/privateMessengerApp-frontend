@@ -35,6 +35,8 @@ export function useMediaHydration(dispatch: AppDispatch, messages: Message[]) {
         m.mediaEnvelope &&
         !m.mediaUri &&
         m.type !== 'video' &&
+        // View-once media downloads only when the recipient opens it.
+        !m.viewOnce &&
         !requested.current.has(m.id),
     );
     if (pending.length === 0) return;

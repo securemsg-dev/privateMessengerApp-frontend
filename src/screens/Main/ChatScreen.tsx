@@ -23,7 +23,12 @@ import {
   clearActiveMessages,
   mergeConversation,
   setActiveConversation,
+  updateMessageStatus,
+  markViewOnceOpened,
 } from '../../store/slices/chatSlice';
+import { markViewOnceOpenedApi } from '../../services/api';
+import { serverHasFeature } from '../../services/serverFeatures';
+import { useContactName } from '../../hooks/useContactName';
 import { AttachmentTray } from '../../components/AttachmentTray';
 import { QuoteBar } from '../../components/QuoteBar';
 import { MessageActionSheet } from '../../components/MessageActionSheet';
@@ -39,9 +44,10 @@ import {
   Message,
   refreshConversationThunk,
 } from '../../store/slices/chatSlice';
-import { CryptoConv, NO_CRYPTO } from '../../services/conversationCrypto';
+import { CryptoConv, NO_CRYPTO, encryptionErrorText } from '../../services/conversationCrypto';
+import { ConnectionBanner } from './chat/ConnectionBanner';
 import { Outbox } from '../../services/outbox';
-import { downloadAndDecryptMedia } from '../../services/media';
+import { discardLocalMedia, downloadAndDecryptMedia } from '../../services/media';
 import { insertAtSelection, Selection } from '../../utils/textInsert';
 import { useCall } from '../../components/CallProvider';
 
@@ -110,7 +116,9 @@ export const ChatScreen = () => {
 
   const isGroup = !!(isGroupParam || conv?.isGroup);
   // Group name can change while open (rename) — prefer the live value.
-  const chatTitle = isGroup ? conv?.contactName || contactName : contactName;
+  // 1:1: the user's own name for this contact wins over the contact's name.
+  const shownContactName = useContactName(isGroup || isSelfChat ? null : contactPrivateNumber, contactName);
+  const chatTitle = isGroup ? conv?.contactName || contactName : shownContactName;
 
   const senderId = userId || privateNumber || 'local';
   const firstName = isGroup ? chatTitle : (contactName || '').split(' ')[0] || 'there';
@@ -125,6 +133,8 @@ export const ChatScreen = () => {
     void startOutgoingCall({ name: contactName, number: contactPrivateNumber, conversationId });
   };
   const openGroupInfo = () => navigation.navigate('GroupInfo', { conversationId });
+  const openContactInfo = () =>
+    navigation.navigate('ContactInfo', { conversationId, contactName, contactPrivateNumber });
 
   // Groups opened from a push / before the list loaded have no member list
   // yet — fetch it (needed to encrypt and to label senders).
@@ -182,6 +192,44 @@ export const ChatScreen = () => {
         );
       });
   };
+  // View-once: download → tell the server it was opened (which wipes it for
+  // everyone) → show it. Marking BEFORE showing means it can never be seen
+  // twice, even if the app is killed mid-view; the local file is removed on
+  // close.
+  const viewOnceUriRef = useRef<string | undefined>(undefined);
+  const [openingViewOnce, setOpeningViewOnce] = useState(false);
+  const handleOpenViewOnce = async (m: Message) => {
+    if (openingViewOnce || !m.mediaEnvelope || m.openedAt) return;
+    setOpeningViewOnce(true);
+    let localUri: string | undefined;
+    try {
+      localUri = await downloadAndDecryptMedia(m.mediaEnvelope);
+      await markViewOnceOpenedApi(m.id);
+    } catch {
+      await discardLocalMedia(localUri);
+      setOpeningViewOnce(false);
+      Alert.alert("Couldn't open", 'Check your connection and try again.');
+      return;
+    }
+    dispatch(markViewOnceOpened({ messageId: m.id, timestamp: new Date().toISOString() }));
+    viewOnceUriRef.current = localUri;
+    setViewerItem({
+      key: m.id,
+      kind: m.type === 'video' ? 'video' : 'image',
+      uri: localUri,
+      title: m.senderName || contactName,
+      timestamp: m.timestamp,
+      mime: m.mediaEnvelope.mime,
+      viewOnce: true,
+    });
+    setOpeningViewOnce(false);
+  };
+  const closeViewer = () => {
+    setViewerItem(null);
+    const uri = viewOnceUriRef.current;
+    viewOnceUriRef.current = undefined;
+    if (uri) void discardLocalMedia(uri);
+  };
   const handleSelectionChange = (
     e: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
   ) => {
@@ -209,7 +257,7 @@ export const ChatScreen = () => {
   const outboxRef = useRef<Outbox | null>(null);
 
   const { hydrateMediaFor } = useMediaHydration(dispatch, messages);
-  const { socketRef, senderIdRef, ackedReadRef } = useChatSocket(
+  const { socketRef, senderIdRef, ackedReadRef, connectionState } = useChatSocket(
     conversationId, isSelfChat, senderId, cryptoRef, outboxRef, dispatch, hydrateMediaFor,
     () => {
       Alert.alert("You're no longer in this group", 'You were removed or the group was deleted.');
@@ -251,7 +299,7 @@ export const ChatScreen = () => {
     selectionRef.current = { start: next.cursor, end: next.cursor };
     setText(next.text);
   };
-  const { handlePickFromGallery, handleCamera, handlePickFile } = useMediaPicker(
+  const { handlePickFromGallery, handleCamera, handlePickFile, handlePickViewOnce } = useMediaPicker(
     sendMediaAsset, closeTray,
   );
   const recorder = useVoiceRecorder(sendMediaAsset, closeTray);
@@ -307,6 +355,29 @@ export const ChatScreen = () => {
     };
   }, [conversationId, dispatch, isSelfChat]);
 
+  // "Not sent · Tap to retry": resend what the outbox still holds (works for
+  // text and already-uploaded media); a text message can also be rebuilt
+  // from the bubble after the outbox has forgotten it.
+  const handleRetry = async (m: Message) => {
+    const outbox = outboxRef.current;
+    if (!outbox || m.status !== 'failed') return;
+    if (await outbox.retry(m.id)) return;
+    if (m.type !== 'text') {
+      Alert.alert("Can't retry", 'Please send this attachment again.');
+      return;
+    }
+    dispatch(updateMessageStatus({ id: m.id, status: 'sending', force: true }));
+    try {
+      await outbox.send(m.id, m.content, {
+        message_type: 'text',
+        reply_to_id: m.replyToId ?? undefined,
+      });
+    } catch (err) {
+      dispatch(updateMessageStatus({ id: m.id, status: 'failed' }));
+      Alert.alert('Message not sent', encryptionErrorText(err, outbox.isGroup()));
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.background }}>
@@ -325,7 +396,7 @@ export const ChatScreen = () => {
           presence={isGroup ? null : peerPresence}
           isGroup={isGroup}
           memberCount={conv?.members?.length}
-          onOpenInfo={openGroupInfo}
+          onOpenInfo={isGroup ? openGroupInfo : openContactInfo}
         />
       </SafeAreaView>
 
@@ -345,6 +416,7 @@ export const ChatScreen = () => {
               the header scrolls off while typing.
           Revisit with react-native-keyboard-controller (needs reanimated +
           worklets + a babel plugin) when there's room to verify it properly. */}
+      <ConnectionBanner state={connectionState} colors={colors} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -359,6 +431,8 @@ export const ChatScreen = () => {
           onReply={handleReply}
           onActionSheet={(m, isSent, rect) => actions.openActionSheet(m, isSent, rect)}
           onOpenMedia={handleOpenMedia}
+          onRetry={handleRetry}
+          onOpenViewOnce={handleOpenViewOnce}
           onLoadOlder={handleLoadOlder}
           loadingOlder={loadingOlder}
         />
@@ -413,6 +487,12 @@ export const ChatScreen = () => {
               onPickCamera={handleCamera}
               onPickFile={handlePickFile}
               onStartVoice={recorder.startRec}
+              // One-to-one chats only, and only when the server supports it.
+              onPickViewOnce={
+                !isSelfChat && !isGroup && serverHasFeature('view_once')
+                  ? handlePickViewOnce
+                  : undefined
+              }
             />
           </>
         )}
@@ -470,7 +550,7 @@ export const ChatScreen = () => {
         }}
       />
 
-      <MediaViewerModal item={viewerItem} onClose={() => setViewerItem(null)} />
+      <MediaViewerModal item={viewerItem} onClose={closeViewer} />
 
       <EmojiPickerSheet
         open={emojiTarget !== null}

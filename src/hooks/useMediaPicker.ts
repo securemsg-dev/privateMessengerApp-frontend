@@ -15,6 +15,7 @@ type SendMediaAsset = (
   mime: string,
   type: 'image' | 'video' | 'voice' | 'document',
   meta?: MediaMeta,
+  opts?: { viewOnce?: boolean },
 ) => Promise<void>;
 
 export function useMediaPicker(
@@ -22,11 +23,14 @@ export function useMediaPicker(
   closeTray: () => void,
 ) {
   /** Optimise (resize photos, poster for videos) then hand to the sender. */
-  const sendPickedAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+  const sendPickedAsset = async (
+    asset: ImagePicker.ImagePickerAsset,
+    opts?: { viewOnce?: boolean },
+  ) => {
     if (asset.type === 'video') {
       try {
         const v = await prepareVideo(asset);
-        await sendMediaAsset(v.uri, v.mime, 'video', v.meta);
+        await sendMediaAsset(v.uri, v.mime, 'video', v.meta, opts);
       } catch (err) {
         if (err instanceof VideoTooLargeError) {
           const mb = (n: number) => Math.round(n / (1024 * 1024));
@@ -41,7 +45,22 @@ export function useMediaPicker(
       return;
     }
     const img = await prepareImage(asset.uri, asset.width, asset.height);
-    await sendMediaAsset(img.uri, img.mime, 'image', img.meta);
+    await sendMediaAsset(img.uri, img.mime, 'image', img.meta, opts);
+  };
+
+  /** Pick a photo/video and send it as view-once (opens a single time). */
+  const handlePickViewOnce = async () => {
+    closeTray();
+    const result = await withoutAppLock(() =>
+      ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        quality: 0.8,
+        videoExportPreset: ImagePicker.VideoExportPreset.H264_1280x720,
+      }),
+    );
+    if (result && !result.canceled && result.assets.length > 0) {
+      await sendPickedAsset(result.assets[0], { viewOnce: true });
+    }
   };
 
   const handlePickFromGallery = async () => {
@@ -97,5 +116,5 @@ export function useMediaPicker(
     }
   };
 
-  return { handlePickFromGallery, handleCamera, handlePickFile };
+  return { handlePickFromGallery, handleCamera, handlePickFile, handlePickViewOnce };
 }

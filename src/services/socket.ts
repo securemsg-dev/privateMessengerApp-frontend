@@ -66,6 +66,15 @@ export interface ServerDeletionEvent {
   timestamp: string;
 }
 
+/** The recipient opened a view-once photo/video — it is gone for everyone. */
+export interface ServerViewOnceOpenedEvent {
+  type: 'view_once_opened';
+  conversation_id: string;
+  message_id: string;
+  by_user_id: string;
+  timestamp: string;
+}
+
 export interface ServerErrorEvent {
   type: 'error';
   detail: string;
@@ -104,6 +113,7 @@ export type ServerEvent =
   | ServerReceiptEvent
   | ServerReactionEvent
   | ServerDeletionEvent
+  | ServerViewOnceOpenedEvent
   | ServerErrorEvent
   | ServerPresenceEvent
   | ServerGroupUpdateEvent
@@ -196,6 +206,22 @@ export class ChatSocket {
     } else {
       this.outboundQueue.push(data);
     }
+  }
+
+  isOpen(): boolean {
+    return this.state === 'open';
+  }
+
+  /**
+   * Remove a not-yet-sent message frame from the offline queue (it timed out
+   * and is now shown as failed — it must not go out later behind the user's
+   * back). Returns true when a frame was removed.
+   */
+  dropQueued(clientTempId: string): boolean {
+    const needle = `"client_temp_id":${JSON.stringify(clientTempId)}`;
+    const before = this.outboundQueue.length;
+    this.outboundQueue = this.outboundQueue.filter((f) => !f.includes(needle));
+    return this.outboundQueue.length !== before;
   }
 
   onEvent(handler: Listener): () => void {

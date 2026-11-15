@@ -26,7 +26,9 @@ export function useMediaSender(
     mime: string,
     msgType: 'image' | 'video' | 'voice' | 'document',
     meta?: MediaMeta,
+    opts?: { viewOnce?: boolean },
   ) => {
+    const viewOnce = !!opts?.viewOnce && (msgType === 'image' || msgType === 'video');
     const localId =
       Date.now().toString(36) + Math.random().toString(36).slice(2);
     const placeholder = mediaPlaceholder(mime);
@@ -37,10 +39,13 @@ export function useMediaSender(
         conversationId,
         senderId,
         receiverId: contactPrivateNumber,
-        content: placeholder,
+        content: viewOnce ? (msgType === 'video' ? 'Video' : 'Photo') : placeholder,
         type: msgType as MessageType,
-        mediaUri: localUri,
-        mediaMeta: meta,
+        // View-once: the sender keeps no preview of what they sent.
+        mediaUri: viewOnce ? undefined : localUri,
+        mediaMeta: viewOnce ? undefined : meta,
+        viewOnce,
+        pending: !isSelfChat,
       }),
     );
 
@@ -73,6 +78,7 @@ export function useMediaSender(
           // Lets the server delete the ciphertext file when this message is
           // deleted for everyone (blob id inside the envelope is unreadable).
           media_blob_id: envelope.blobId,
+          ...(viewOnce ? { self_destruct: true } : {}),
         });
       } catch (err) {
         if (__DEV__) console.warn('[crypto] envelope encrypt failed; not sending:', err);

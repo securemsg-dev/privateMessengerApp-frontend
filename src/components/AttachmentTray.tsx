@@ -14,6 +14,8 @@ interface Props {
   onPickCamera: () => void;
   onPickFile: () => void;
   onStartVoice: () => void;
+  /** Send a photo/video that opens a single time. Omit to hide the option. */
+  onPickViewOnce?: () => void;
 }
 
 interface ItemProps {
@@ -46,6 +48,7 @@ export const AttachmentTray = ({
   onPickCamera,
   onPickFile,
   onStartVoice,
+  onPickViewOnce,
 }: Props) => {
   const { colors } = useTheme();
   const heightAnim = useRef(new Animated.Value(0)).current;
@@ -82,6 +85,15 @@ export const AttachmentTray = ({
           textColor={colors.text}
           onPress={onPickCamera}
         />
+        {onPickViewOnce && (
+          <TrayItem
+            icon="timer-outline"
+            label="View once"
+            bg={colors.primary}
+            textColor={colors.text}
+            onPress={onPickViewOnce}
+          />
+        )}
         <TrayItem
           icon="document-text"
           label="File"

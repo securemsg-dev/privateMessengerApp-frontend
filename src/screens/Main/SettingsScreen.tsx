@@ -25,11 +25,13 @@ import {
   setNotificationsEnabledThunk,
 } from '../../store/slices/settingsSlice';
 import { deleteAccountThunk } from '../../store/slices/authSlice';
-import { useTheme } from '../../theme/ThemeContext';
+import { ThemeMode, useTheme } from '../../theme/ThemeContext';
 import { Avatar } from '../../components/Avatar';
 import { BottomSheet } from '../../components/BottomSheet';
 import { getMeApi, patchMeApi } from '../../services/api';
 import { serverHasFeature } from '../../services/serverFeatures';
+
+const THEME_MODES: ThemeMode[] = ['system', 'light', 'dark'];
 
 const LANGUAGES: { code: Language; label: string }[] = [
   { code: 'en', label: 'English' },
@@ -124,7 +126,10 @@ const SectionHeader = ({ label, colors }: { label: string; colors: Colors }) => 
 );
 
 export const SettingsScreen = () => {
-  const { colors, isDark } = useTheme();
+  const { colors, isDark, mode: themeMode, setMode: setThemeMode } = useTheme();
+  const [themeSheetVisible, setThemeSheetVisible] = useState(false);
+  const themeLabel = (m: ThemeMode) =>
+    t(m === 'system' ? 'settings.themeSystem' : m === 'light' ? 'settings.themeLight' : 'settings.themeDark');
   const { t } = useTranslation();
   const navigation = useNavigation<any>();
   const dispatch = useDispatch<AppDispatch>();
@@ -340,6 +345,17 @@ export const SettingsScreen = () => {
               </Text>
             }
             onPress={() => setLanguageSheetVisible(true)}
+          />
+          <Row
+            colors={colors}
+            icon="contrast-outline"
+            label={t('settings.appearance')}
+            right={
+              <Text style={[styles.rowValue, { color: colors.textSecondary }]}>
+                {themeLabel(themeMode)}
+              </Text>
+            }
+            onPress={() => setThemeSheetVisible(true)}
             isLast
           />
         </View>
@@ -385,6 +401,40 @@ export const SettingsScreen = () => {
           Cricchat · v1.0  ·  end-to-end encrypted
         </Text>
       </ScrollView>
+
+      {/* Appearance picker: System / Light / Dark */}
+      <BottomSheet visible={themeSheetVisible} onClose={() => setThemeSheetVisible(false)}>
+        <View accessibilityRole="radiogroup">
+          <Text style={[styles.sheetTitle, { color: colors.text }]}>
+            {t('settings.chooseAppearance')}
+          </Text>
+          {THEME_MODES.map((m) => (
+            <TouchableOpacity
+              key={m}
+              style={[styles.languageRow, { backgroundColor: colors.background }]}
+              onPress={() => {
+                setThemeMode(m);
+                setThemeSheetVisible(false);
+              }}
+              activeOpacity={0.7}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: themeMode === m }}
+            >
+              <View>
+                <Text style={[styles.languageLabel, { color: colors.text }]}>{themeLabel(m)}</Text>
+                {m === 'system' && (
+                  <Text style={{ fontSize: 12, marginTop: 2, color: colors.textSecondary }}>
+                    {t('settings.themeSystemHint')}
+                  </Text>
+                )}
+              </View>
+              {themeMode === m ? (
+                <Ionicons name="checkmark" size={20} color={colors.accent} />
+              ) : null}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </BottomSheet>
 
       {/* Language picker */}
       <BottomSheet visible={languageSheetVisible} onClose={() => setLanguageSheetVisible(false)}>

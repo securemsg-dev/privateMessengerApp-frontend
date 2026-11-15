@@ -51,7 +51,30 @@ export const styles = StyleSheet.create({
   metaRow: { paddingHorizontal: 4, marginTop: 2, marginBottom: 6 },
   metaLeft: { alignItems: 'flex-start' },
   metaRight: { alignItems: 'flex-end' },
-  metaText: { fontSize: 10, fontWeight: '600', letterSpacing: 0.6 },
+  metaText: { fontSize: 11, fontWeight: '500', letterSpacing: 0.2 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  /* View-once photo/video bubble */
+  viewOnceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 2 },
+  viewOnceBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewOnceBadgeText: { fontSize: 13, fontWeight: '800' },
+  viewOnceHint: { fontSize: 12, marginTop: 1 },
+  /* Slim strip under the header while the chat socket reconnects */
+  connectionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  connectionBannerText: { fontSize: 12, fontWeight: '500' },
 
   /* Reaction badges */
   reactionRow: {

@@ -394,6 +394,8 @@ export interface MessageDTO {
   delivered_at: string | null;
   read_at: string | null;
   self_destruct: boolean;
+  /** View-once media: set once the recipient opened it (payload is then ''). */
+  opened_at?: string | null;
   // Phase C.2 — per-message metadata
   reactions: ReactionAggregateDTO[];
   is_starred: boolean;
@@ -713,6 +715,17 @@ export function deleteMessageApi(
     method: 'POST',
     auth: true,
     body: { scope },
+  });
+}
+
+/**
+ * Tell the server the recipient has opened a view-once photo/video. The server
+ * wipes the ciphertext + blob and notifies both sides. Idempotent.
+ */
+export function markViewOnceOpenedApi(messageId: string): Promise<void> {
+  return requestWithRefresh<void>(`/messages/${messageId}/opened`, {
+    method: 'POST',
+    auth: true,
   });
 }
 

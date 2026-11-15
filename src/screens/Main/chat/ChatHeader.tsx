@@ -77,17 +77,26 @@ export const ChatHeader = ({
         <Ionicons name="people" size={20} color={colors.primary} />
       </View>
     ) : (
-      <Avatar
-        profilePictureKey={isSelfChat ? null : contactProfilePictureKey}
-        name={isSelfChat ? displayName || 'ME' : contactName}
-        size={36}
-      />
+      // Tapping the photo opens contact info (not in the self-chat).
+      <TouchableOpacity
+        onPress={onOpenInfo}
+        disabled={isSelfChat || !onOpenInfo}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${contactName}, contact info`}
+      >
+        <Avatar
+          profilePictureKey={isSelfChat ? null : contactProfilePictureKey}
+          name={isSelfChat ? displayName || 'ME' : contactName}
+          size={36}
+        />
+      </TouchableOpacity>
     )}
 
     <TouchableOpacity
       style={styles.headerInfo}
-      onPress={isGroup ? onOpenInfo : undefined}
-      disabled={!isGroup}
+      onPress={isSelfChat ? undefined : onOpenInfo}
+      disabled={isSelfChat || !onOpenInfo}
       activeOpacity={0.7}
     >
       <Text style={[styles.headerName, { color: colors.text }]} numberOfLines={1}>
